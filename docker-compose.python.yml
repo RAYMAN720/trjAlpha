@@ -1,0 +1,8 @@
+services:
+  python-engine:
+    build: ./python-engine
+    ports:
+      - "8001:8001"
+    environment:
+      PYTHON_ENGINE_ENV: development
+      PYTHON_ENGINE_LOG_LEVEL: INFO
