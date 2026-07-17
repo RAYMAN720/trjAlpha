@@ -417,20 +417,6 @@ export type AutomationStatus = {
   jobs: ScannerJob[];
 };
 
-export type AnalysisEngineStatus = {
-  enabled: true;
-  engine: "typescript";
-  connected: boolean;
-  lastAnalysisAt?: string | null;
-  engines: {
-    indicators: "active";
-    multiTimeframe: "active";
-    backtesting: "active";
-    risk: "active";
-  };
-  paperTradingOnly: true;
-  realTradingEnabled: false;
-};
 
 export type AIProviderHealth = {
   provider: string;
@@ -1039,4 +1025,42 @@ export type ProfessionalDesk = {
   execution: ExecutionSimulationSummary;
   shadow: ShadowStrategySummary;
   recentRegimes: MarketRegimeSnapshot[];
+};
+
+export type LeanEngineCapability = {
+  key: string;
+  name: string;
+  enabled: boolean;
+  implementation: "LEAN" | "TRADEPILOT" | "SHARED";
+  description: string;
+};
+
+export type LeanEngineStatus = {
+  configured: boolean;
+  reachable: boolean;
+  mode: "PAPER_ONLY";
+  provider: "QuantConnect LEAN";
+  engineImage: string;
+  gatewayUrl?: string | null;
+  algorithm: string;
+  algorithmVersion: string;
+  architecture: string[];
+  capabilities: LeanEngineCapability[];
+  warning?: string;
+  gateway?: unknown;
+};
+
+export type LeanJob = {
+  id: string;
+  mode: "BACKTEST" | "PAPER";
+  status: "QUEUED" | "STARTING" | "RUNNING" | "COMPLETED" | "FAILED" | "STOPPED";
+  algorithm: string;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  containerId?: string | null;
+  resultPath?: string | null;
+  error?: string | null;
+  request?: unknown;
+  summary?: Record<string, unknown> | null;
 };

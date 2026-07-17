@@ -1,0 +1,23 @@
+[Unit]
+Description=TradePilot QuantConnect LEAN Gateway
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=tradepilot
+Group=tradepilot
+WorkingDirectory=/opt/tradepilot/lean-gateway
+EnvironmentFile=/opt/tradepilot/lean-gateway/.env
+ExecStart=/usr/bin/node /opt/tradepilot/lean-gateway/src/server.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/tradepilot/lean-gateway/runtime
+
+[Install]
+WantedBy=multi-user.target

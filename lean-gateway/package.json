@@ -1,0 +1,14 @@
+{
+  "name": "tradepilot-lean-gateway",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "check": "node --check src/server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "Authenticated paper-only job controller for the official QuantConnect LEAN Docker engine."
+}

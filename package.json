@@ -1,16 +1,19 @@
 {
   "name": "tradepilot-ai-scanner",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Demo-only AI market scanner, research assistant, and paper-trading simulator.",
+  "description": "TradePilot dashboard and safety layer powered by the QuantConnect LEAN event-driven engine for backtesting and Alpaca paper trading.",
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix lean-gateway",
     "prisma:generate": "npm run prisma:generate --prefix backend",
     "dev": "npm run dev --prefix backend & npm run dev --prefix frontend",
-    "worker": "npm run worker --prefix backend",
-    "check": "npm run check --prefix backend && npm run check --prefix frontend",
+    "check": "npm run check --prefix backend && npm run check --prefix frontend && npm run check:lean-gateway",
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
-    "seed": "npm run seed --prefix backend"
+    "seed": "npm run seed --prefix backend",
+    "dev:lean-gateway": "npm run start --prefix lean-gateway",
+    "check:lean-gateway": "npm run check --prefix lean-gateway",
+    "build:lean-engine": "docker build -t tradepilot-lean-engine:latest ./lean-engine",
+    "check:lean-static": "node scripts/validate-lean-static.mjs"
   },
   "engines": {
     "node": "22.x"

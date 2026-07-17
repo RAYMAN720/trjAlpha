@@ -37,7 +37,6 @@ import { collectLatestNews, getNewsStatus } from "../services/news/newsCollector
 import { getNoTradeStatus } from "../services/noTradeService.js";
 import { getPaperAccountEquity, getPaperAccountSummary, resetPaperAccount } from "../services/paperAccountService.js";
 import { getPlaybooksStatus } from "../services/playbooks/playbookService.js";
-import { getTypeScriptAnalysisEngineStatus } from "../services/typeScriptAnalysisEngine.js";
 import { blockRealTradingAttempt } from "../services/riskEngineService.js";
 import { getAdvancedRiskStatus } from "../services/risk/advancedRiskManager.js";
 import { getLatestScan, getSignals, runMarketScan } from "../services/scannerService.js";
@@ -55,6 +54,14 @@ import { getRecentProfessionalDecisions } from "../services/professional/profess
 import { getExecutionSimulationSummary } from "../services/professional/executionSimulationService.js";
 import { getShadowStrategySummary, refreshShadowTrades } from "../services/professional/shadowStrategyService.js";
 import { getTradingControl, haltNewPaperEntries, resumePaperEntries } from "../services/professional/tradingControlService.js";
+import {
+  getLeanEngineStatus,
+  getLeanJob,
+  listLeanJobs,
+  startLeanPaperTrading,
+  stopLeanJob,
+  submitLeanBacktest
+} from "../services/lean/leanEngineService.js";
 
 export const apiRouter = Router();
 
@@ -302,10 +309,10 @@ apiRouter.get("/system/status", async (_req, res, next) => {
       databaseConnected = false;
     }
 
-    const [aiStatus, automationStatus, analysisEngine, lastStockScan, lastCryptoScan, lastResearch] = await Promise.all([
+    const [aiStatus, automationStatus, leanEngine, lastStockScan, lastCryptoScan, lastResearch] = await Promise.all([
       getAIStatus(),
       getAutomationStatus(),
-      getTypeScriptAnalysisEngineStatus(),
+      getLeanEngineStatus(),
       getLatestScan("stocks"),
       getLatestScan("crypto"),
       prisma.researchReport.findFirst({ orderBy: { createdAt: "desc" } })
@@ -326,7 +333,7 @@ apiRouter.get("/system/status", async (_req, res, next) => {
       lastCryptoScan: lastCryptoScan?.scanDate ?? null,
       lastResearchRun: lastResearch?.createdAt ?? null,
       technicalEngineStatus: "enabled",
-      analysisEngine,
+      leanEngine,
       realTradingDisabled: true,
       paperTradingOnly: true
     });
@@ -1305,13 +1312,7 @@ apiRouter.get("/ai/status", async (_req, res, next) => {
   }
 });
 
-apiRouter.get("/analysis-engine/status", async (_req, res, next) => {
-  try {
-    res.json(await getTypeScriptAnalysisEngineStatus());
-  } catch (error) {
-    next(error);
-  }
-});
+
 
 apiRouter.get("/ai/analyses", async (req, res, next) => {
   try {
@@ -1439,6 +1440,71 @@ apiRouter.get("/broker/orders", async (_req, res, next) => {
 apiRouter.post("/broker/orders/from-trade-plan", async (req, res, next) => {
   try {
     res.json(await submitBrokerOrderFromTradePlan(String(req.body.tradePlanId)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+apiRouter.get("/lean/status", async (_req, res, next) => {
+  try {
+    res.json(await getLeanEngineStatus());
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.get("/lean/jobs", async (_req, res, next) => {
+  try {
+    res.json(await listLeanJobs());
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.get("/lean/jobs/:id", async (req, res, next) => {
+  try {
+    res.json(await getLeanJob(req.params.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.post("/lean/backtests", async (req, res, next) => {
+  try {
+    const startDate = String(req.body.startDate ?? "");
+    const endDate = String(req.body.endDate ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ error: "startDate and endDate must use YYYY-MM-DD." });
+    }
+    res.status(202).json(await submitLeanBacktest({
+      startDate,
+      endDate,
+      initialCash: Number(req.body.initialCash ?? 100_000),
+      benchmark: String(req.body.benchmark ?? "SPY"),
+      symbols: Array.isArray(req.body.symbols) ? req.body.symbols.map(String) : undefined,
+      parameters: req.body.parameters && typeof req.body.parameters === "object" ? req.body.parameters : undefined
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.post("/lean/paper/start", async (req, res, next) => {
+  try {
+    res.status(202).json(await startLeanPaperTrading({
+      initialCash: Number(req.body.initialCash ?? 100_000),
+      symbols: Array.isArray(req.body.symbols) ? req.body.symbols.map(String) : undefined,
+      parameters: req.body.parameters && typeof req.body.parameters === "object" ? req.body.parameters : undefined
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.post("/lean/jobs/:id/stop", async (req, res, next) => {
+  try {
+    res.json(await stopLeanJob(req.params.id));
   } catch (error) {
     next(error);
   }

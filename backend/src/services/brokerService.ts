@@ -1,6 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { createAlert } from "./alertService.js";
-import { assertPaperTradingOnly } from "./startupSafetyService.js";
+import { blockRealTradingAttempt } from "./riskEngineService.js";
 
 type BrokerEnvironment = "paper" | "live";
 type AlpacaAuthMode = "api_key" | "oauth_client_credentials";
@@ -70,7 +70,7 @@ function buildAlpacaTradingUrl(baseUrl: string, path: string) {
 }
 
 export function getBrokerConfig(): BrokerConfig {
-  const environment: BrokerEnvironment = "paper";
+  const environment = process.env.ALPACA_TRADING_ENV === "live" ? "live" : "paper";
   const authMode: AlpacaAuthMode =
     process.env.ALPACA_AUTH_MODE === "oauth_client_credentials" ? "oauth_client_credentials" : "api_key";
   const oauthConfigured = Boolean(process.env.ALPACA_OAUTH_CLIENT_ID?.trim() && process.env.ALPACA_OAUTH_CLIENT_SECRET?.trim());
@@ -81,14 +81,16 @@ export function getBrokerConfig(): BrokerConfig {
     environment,
     authMode,
     baseUrl: normalizeBaseUrl(process.env.ALPACA_TRADING_BASE_URL?.trim() || defaultAlpacaTradingBaseUrl(environment)),
-    authBaseUrl: process.env.ALPACA_AUTH_BASE_URL?.trim() ?? "https://authx.sandbox.alpaca.markets/v1",
+    authBaseUrl:
+      process.env.ALPACA_AUTH_BASE_URL?.trim() ??
+      (environment === "live" ? "https://authx.alpaca.markets/v1" : "https://authx.sandbox.alpaca.markets/v1"),
     keyId: process.env.ALPACA_API_KEY_ID?.trim(),
     secretKey: process.env.ALPACA_API_SECRET_KEY?.trim(),
     oauthClientId: process.env.ALPACA_OAUTH_CLIENT_ID?.trim(),
     oauthClientSecret: process.env.ALPACA_OAUTH_CLIENT_SECRET?.trim(),
     configured: authMode === "oauth_client_credentials" ? oauthConfigured : apiKeyConfigured,
     oauthConfigured,
-    liveTradingAllowed: false
+    liveTradingAllowed: process.env.ALLOW_LIVE_BROKER_TRADING === "true"
   };
 }
 
@@ -307,9 +309,39 @@ function buildAlpacaOrderBody(input: OrderInput) {
 }
 
 export async function submitBrokerOrder(input: OrderInput) {
-  assertPaperTradingOnly("Broker order");
   const config = getBrokerConfig();
   const requestBody = buildAlpacaOrderBody(input);
+
+  if (config.environment === "live") {
+    await blockRealTradingAttempt({
+      provider: config.provider,
+      ticker: input.ticker,
+      source: input.source,
+      requestedOrder: requestBody
+    });
+
+    return prisma.brokerOrder.create({
+      data: {
+        provider: config.provider,
+        environment: config.environment,
+        ticker: input.ticker.toUpperCase(),
+        side: input.side,
+        orderType: input.orderType ?? "market",
+        timeInForce: input.timeInForce ?? "day",
+        quantity: input.quantity,
+        limitPrice: input.limitPrice,
+        stopPrice: input.stopPrice,
+        takeProfitPrice: input.takeProfitPrice,
+        status: "Blocked",
+        source: input.source,
+        tradePlanId: input.tradePlanId,
+        paperTradeId: input.paperTradeId,
+        requestJson: JSON.stringify(requestBody),
+        error: "Live real-money broker execution is disabled by server-side guardrails.",
+        realMoneyBlocked: true
+      }
+    });
+  }
 
   if (!config.configured) {
     return prisma.brokerOrder.create({
@@ -405,6 +437,10 @@ export async function submitBrokerOrder(input: OrderInput) {
 }
 
 export async function submitBrokerOrderFromTradePlan(tradePlanId: string) {
+  if ((process.env.TRADING_ENGINE ?? "native").toLowerCase() === "lean") {
+    throw new Error("Direct TradePilot broker submission is disabled because QuantConnect LEAN owns order execution.");
+  }
+
   const plan = await prisma.tradePlan.findUnique({ where: { id: tradePlanId } });
   if (!plan) {
     throw new Error("Trade plan not found.");

@@ -515,6 +515,10 @@ export async function paperTradeUpdateJob() {
     }
     await reconcilePaperAccount(undefined, { createSnapshot: updatedCount > 0 || closedCount > 0 });
 
+    if ((process.env.TRADING_ENGINE ?? "native").toLowerCase() === "lean") {
+      return `Updated ${updatedCount} legacy simulator trades; ${blockedUpdates} updates blocked. LEAN owns all new automated entries.`;
+    }
+
     if (!aiConfig.paperTradingEnabled) {
       return `Updated ${updatedCount} open paper trades; ${blockedUpdates} updates blocked by market-data safeguards. New paper trading is disabled by PAPER_TRADING_ENABLED=false.`;
     }

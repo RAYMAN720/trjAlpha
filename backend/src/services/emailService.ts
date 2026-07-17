@@ -10,7 +10,7 @@ type EmailDeliveryResult = {
 };
 
 export function getOwnerEmail() {
-  return (process.env.APP_OWNER_EMAIL?.trim() || "rayanntchamba@gmail.com").toLowerCase();
+  return (process.env.APP_OWNER_EMAIL?.trim() || "owner@example.com").toLowerCase();
 }
 
 export function maskEmail(email: string) {

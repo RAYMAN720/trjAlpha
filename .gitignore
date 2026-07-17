@@ -1,7 +1,6 @@
 node_modules/
 dist/
 .venv/
-python-engine/.venv/
 __pycache__/
 *.pyc
 
@@ -16,3 +15,8 @@ backend/prisma/*.db-journal
 
 .DS_Store
 *.log
+lean-gateway/.env
+lean-gateway/runtime/*
+!lean-gateway/runtime/data/
+!lean-gateway/runtime/data/README.md
+lean-engine/data/

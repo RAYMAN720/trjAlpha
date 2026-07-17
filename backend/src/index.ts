@@ -5,10 +5,8 @@ import dotenv from "dotenv";
 import express from "express";
 import { apiRouter } from "./routes/api.js";
 import { startAutomationWorkers } from "./services/automationService.js";
-import { validateStartupSafety } from "./services/startupSafetyService.js";
 
 dotenv.config();
-validateStartupSafety();
 
 const app = express();
 const port = Number(process.env.PORT ?? 8000);

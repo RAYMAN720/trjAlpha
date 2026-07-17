@@ -9,6 +9,7 @@ import { BenchmarkPage } from "./pages/BenchmarkPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { HomeOverviewPage } from "./pages/HomeOverviewPage";
 import { JournalPage } from "./pages/JournalPage";
+import { LeanEnginePage } from "./pages/LeanEnginePage";
 import { LearningDashboardPage } from "./pages/LearningDashboardPage";
 import { LivePaperTradingPage } from "./pages/LivePaperTradingPage";
 import { NewsPage } from "./pages/NewsPage";
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/crypto/alerts" element={<CryptoRoutes><AlertsCenterPage /></CryptoRoutes>} />
             <Route path="/crypto/reports" element={<CryptoRoutes><ReportsCenterPage /></CryptoRoutes>} />
             <Route path="/professional" element={<ProfessionalDeskPage />} />
+            <Route path="/lean" element={<LeanEnginePage />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />
             <Route path="/strategy-lab" element={<PlaybooksPage />} />
             <Route path="/benchmark" element={<BenchmarkPage />} />

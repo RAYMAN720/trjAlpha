@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { emailDeliveryConfigured, getOwnerEmail, maskEmail, sendAccessCodeEmail } from "./emailService.js";
 
 type AccessTokenPayload = {
-  sub: "rayann";
+  sub: "tradepilot-owner";
   name: "Rayann";
   role: "owner";
   iat: number;
@@ -163,7 +163,7 @@ export function createAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   const ttlHours = Number(process.env.APP_AUTH_TOKEN_HOURS ?? 12);
   const payload: AccessTokenPayload = {
-    sub: "rayann",
+    sub: "tradepilot-owner",
     name: ownerName,
     role: "owner",
     iat: now,
@@ -190,7 +190,7 @@ export function verifyAccessToken(token?: string | null) {
 
   try {
     const payload = JSON.parse(base64UrlDecode(encodedPayload)) as AccessTokenPayload;
-    if (payload.sub !== "rayann" || payload.role !== "owner") return null;
+    if (payload.sub !== "tradepilot-owner" || payload.role !== "owner") return null;
     if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {

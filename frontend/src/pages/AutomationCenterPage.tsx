@@ -6,20 +6,20 @@ import { LoadingSkeleton } from "../components/LoadingSkeleton";
 import { StatCard } from "../components/StatCard";
 import { api } from "../lib/api";
 import { dateShort } from "../lib/format";
-import type { AIStatus, AutomationStatus, AnalysisEngineStatus } from "../lib/types";
+import type { AIStatus, AutomationStatus, LeanEngineStatus } from "../lib/types";
 
 export function AutomationCenterPage() {
   const [status, setStatus] = useState<AutomationStatus | null>(null);
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
-  const [analysisStatus, setAnalysisStatus] = useState<AnalysisEngineStatus | null>(null);
+  const [leanStatus, setLeanStatus] = useState<LeanEngineStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
 
   async function load() {
-    const [automationData, aiData, analysisData] = await Promise.all([api.automationStatus(), api.aiStatus(), api.analysisEngineStatus()]);
+    const [automationData, aiData, leanData] = await Promise.all([api.automationStatus(), api.aiStatus(), api.leanStatus()]);
     setStatus(automationData);
     setAiStatus(aiData);
-    setAnalysisStatus(analysisData);
+    setLeanStatus(leanData);
   }
 
   useEffect(() => {
@@ -65,36 +65,36 @@ export function AutomationCenterPage() {
         <StatCard label="Open paper trades" value={status.openPaperTrades} icon={WalletCards} tone="purple" />
       </div>
 
-      {analysisStatus ? (
-        <section className="rounded-lg border border-mint/25 bg-mint/10 p-5 shadow-glow">
+      {leanStatus ? (
+        <section className={`rounded-lg border p-5 shadow-glow ${leanStatus.reachable ? "border-mint/25 bg-mint/10" : "border-caution/25 bg-caution/10"}`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-mint">Professional analysis engine</p>
-              <h3 className="mt-1 text-lg font-semibold text-stone-50">TypeScript Analysis Engine</h3>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-mint">Institutional-grade engine</p>
+              <h3 className="mt-1 text-lg font-semibold text-stone-50">QuantConnect LEAN</h3>
               <p className="mt-1 text-sm text-stone-400">
-                Technical indicators, multi-timeframe analysis, strategy backtests, execution simulation, and risk checks run in the Node.js backend.
+                One event-driven C# algorithm for historical backtests and Alpaca paper execution, with LEAN portfolio, order, fill, fee, slippage, calendar, and corporate-action models.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <SafetyBadge label="TYPESCRIPT ENGINE ACTIVE" tone="green" />
-              <SafetyBadge label="NO PYTHON REQUIRED" tone="green" />
+              <SafetyBadge label={leanStatus.reachable ? "LEAN GATEWAY ACTIVE" : "LEAN GATEWAY OFFLINE"} tone={leanStatus.reachable ? "green" : "amber"} />
               <SafetyBadge label="PAPER TRADING ONLY" tone="purple" />
+              <SafetyBadge label="LIVE MONEY BLOCKED" tone="red" />
             </div>
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <StatCard
-              label="Connection"
-              value={analysisStatus.connected ? "Active" : "Unavailable"}
-              detail="Node.js and TypeScript"
-              icon={Cpu}
-              tone="green"
-            />
-            <StatCard label="Last analysis" value={analysisStatus.lastAnalysisAt ? dateShort(analysisStatus.lastAnalysisAt) : "None yet"} icon={Clock3} tone="neutral" />
-            <StatCard label="Indicators" value={analysisStatus.engines.indicators} icon={Gauge} tone="green" />
-            <StatCard label="Backtesting" value={analysisStatus.engines.backtesting} icon={Activity} tone="green" />
-            <StatCard label="Risk engine" value={analysisStatus.engines.risk} icon={ShieldOff} tone="green" />
+            <StatCard label="Connection" value={leanStatus.reachable ? "Connected" : "Unavailable"} detail={leanStatus.gatewayUrl ?? "Not configured"} icon={Cpu} tone={leanStatus.reachable ? "green" : "amber"} />
+            <StatCard label="Algorithm" value={leanStatus.algorithm} detail={`v${leanStatus.algorithmVersion}`} icon={Activity} tone="purple" />
+            <StatCard label="Engine image" value={leanStatus.engineImage.replace("quantconnect/", "")} icon={Gauge} tone="neutral" />
+            <StatCard label="Backtesting" value={leanStatus.capabilities.some((item) => item.key === "shared-algorithm" && item.enabled) ? "LEAN" : "Off"} icon={Clock3} tone={leanStatus.capabilities.some((item) => item.key === "shared-algorithm" && item.enabled) ? "green" : "amber"} />
+            <StatCard label="Broker mode" value={leanStatus.mode === "PAPER_ONLY" ? "Paper only" : "Blocked"} icon={ShieldOff} tone="green" />
           </div>
+
+          {leanStatus.warning ? (
+            <div className="mt-4 rounded-lg border border-caution/25 bg-black/20 p-3 text-sm text-amber-100">
+              LEAN gateway message: {leanStatus.warning}
+            </div>
+          ) : null}
         </section>
       ) : null}
 

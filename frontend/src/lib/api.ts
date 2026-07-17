@@ -18,6 +18,8 @@ import type {
   EquitySnapshot,
   JournalEntry,
   LearningSummary,
+  LeanEngineStatus,
+  LeanJob,
   MarketScan,
   MarketSignal,
   NewsScanResult,
@@ -31,7 +33,6 @@ import type {
   TradingControl,
   ShadowStrategySummary,
   NoTradeStatus,
-  AnalysisEngineStatus,
   ResearchReport,
   RiskStatus,
   RiskEvent,
@@ -209,7 +210,6 @@ export const api = {
     apiRequest<{ refresh: { checked: number; updated: number; closed: number }; summary: ShadowStrategySummary }>(`/professional/shadow/refresh${marketQuery(market)}`, { method: "POST", body: {} }),
   weeklyTraderReport: () => apiRequest<WeeklyTraderReport>("/reports/weekly"),
   aiStatus: () => apiRequest<AIStatus>("/ai/status"),
-  analysisEngineStatus: () => apiRequest<AnalysisEngineStatus>("/analysis-engine/status"),
   aiAnalyses: () => apiRequest<AIAnalysisSummary[]>("/ai/analyses"),
   runAutomationJob: (name: string) => apiRequest<{ ok: boolean; summary: string }>(`/automation/jobs/${name}/run`, { method: "POST", body: {} }),
   setAutoPaperTrading: (autoPaperTrading: boolean) =>
@@ -227,7 +227,14 @@ export const api = {
   brokerSync: () => apiRequest<{ configured: boolean; connection: BrokerStatus["connection"]; error?: string }>("/broker/sync", { method: "POST", body: {} }),
   brokerOrders: () => apiRequest<BrokerOrder[]>("/broker/orders"),
   submitBrokerOrderFromTradePlan: (tradePlanId: string) =>
-    apiRequest<BrokerOrder>("/broker/orders/from-trade-plan", { method: "POST", body: { tradePlanId } })
+    apiRequest<BrokerOrder>("/broker/orders/from-trade-plan", { method: "POST", body: { tradePlanId } }),
+  leanStatus: () => apiRequest<LeanEngineStatus>("/lean/status"),
+  leanJobs: () => apiRequest<LeanJob[]>("/lean/jobs"),
+  runLeanBacktest: (body: { startDate: string; endDate: string; initialCash?: number; benchmark?: string; symbols?: string[] }) =>
+    apiRequest<LeanJob>("/lean/backtests", { method: "POST", body }),
+  startLeanPaper: (body: { initialCash?: number; symbols?: string[] }) =>
+    apiRequest<LeanJob>("/lean/paper/start", { method: "POST", body }),
+  stopLeanJob: (id: string) => apiRequest<LeanJob>(`/lean/jobs/${id}/stop`, { method: "POST", body: {} })
 };
 
 export function parseSources(report?: ResearchReport | null) {

@@ -1,13 +1,12 @@
 {
   "name": "tradepilot-ai-scanner-backend",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/src/index.js",
-    "worker": "node dist/src/worker.js",
     "seed": "tsx prisma/seed.ts",
     "prisma:generate": "prisma generate",
     "prisma:generate:postgres": "prisma generate --schema prisma/schema.postgres.prisma",

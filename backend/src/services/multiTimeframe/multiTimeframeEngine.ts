@@ -1,5 +1,4 @@
 import { marketDataProvider, marketForAssetType, type AssetType, type MarketMode } from "../marketDataProvider.js";
-import { markTypeScriptAnalysisRun } from "../typeScriptAnalysisEngine.js";
 import { alignTimeframes } from "./timeframeAlignment.js";
 import { analyzeTimeframeCandles, type TimeframeAnalysis, type TimeframeName } from "./timeframeAnalyzer.js";
 
@@ -7,8 +6,8 @@ export type MultiTimeframeResult = ReturnType<typeof alignTimeframes> & {
   assetType: AssetType;
   ticker: string;
   timeframes: TimeframeAnalysis[];
-  engine?: "typescript";
-  analysisWarning?: string | null;
+  engine: "typescript";
+  engineWarning?: string | null;
 };
 
 export async function analyzeMultiTimeframe(ticker: string, marketOrAsset: MarketMode | AssetType = "stocks"): Promise<MultiTimeframeResult> {
@@ -25,7 +24,6 @@ export async function analyzeMultiTimeframe(ticker: string, marketOrAsset: Marke
   const missingWarning = missingFrames.length
     ? `Real candle data unavailable or insufficient for: ${missingFrames.join(", ")}. Trading must remain blocked until data recovers.`
     : null;
-  markTypeScriptAnalysisRun();
 
   return {
     assetType,
@@ -35,7 +33,7 @@ export async function analyzeMultiTimeframe(ticker: string, marketOrAsset: Marke
     score: missingFrames.length ? 0 : alignment.score,
     alignment: missingFrames.length ? "conflicting" : alignment.alignment,
     warning: missingWarning ?? alignment.warning,
-    analysisWarning: missingWarning,
+    engineWarning: missingWarning,
     timeframes
   };
 }
