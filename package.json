@@ -1,14 +1,16 @@
 {
   "name": "tradepilot-ai-scanner",
-  "version": "2.0.0-rebuild",
+  "version": "2.0.0",
   "private": true,
-  "description": "Frontend-only rebuild shell for TradePilot AI Scanner.",
+  "description": "Demo-only AI market scanner, research assistant, and paper-trading simulator.",
   "scripts": {
-    "install:all": "npm install --prefix frontend",
-    "dev": "npm run dev --prefix frontend -- --port 8000",
-    "check": "npm run check --prefix frontend",
-    "build": "npm run build --prefix frontend",
-    "preview": "npm run preview --prefix frontend -- --port 8000"
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "prisma:generate": "npm run prisma:generate --prefix backend",
+    "dev": "npm run dev --prefix backend & npm run dev --prefix frontend",
+    "worker": "npm run worker --prefix backend",
+    "check": "npm run check --prefix backend && npm run check --prefix frontend",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "seed": "npm run seed --prefix backend"
   },
   "engines": {
     "node": "22.x"

@@ -1,0 +1,35 @@
+{
+  "name": "tradepilot-ai-scanner-backend",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "worker": "node dist/src/worker.js",
+    "seed": "tsx prisma/seed.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:generate:postgres": "prisma generate --schema prisma/schema.postgres.prisma",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma db push",
+    "prisma:deploy:postgres": "prisma db push --schema prisma/schema.postgres.prisma",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.11.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/node": "^24.13.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^4.6.0",
+    "openai": "^5.8.2",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "zod": "^3.25.76"
+  }
+}

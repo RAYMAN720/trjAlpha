@@ -1,12 +1,196 @@
 services:
+  - type: redis
+    name: tradepilot-redis
+    plan: free
+    ipAllowList: []
+
   - type: web
-    name: tradepilot-ai-scanner
+    name: tradepilot-frontend
     runtime: static
     plan: free
-    rootDir: .
-    buildCommand: cd frontend && npm ci && npm run build
-    staticPublishPath: frontend/dist
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  - type: web
+    name: tradepilot-api
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: cd backend && npm ci --include=dev && npm run prisma:generate:postgres && npm run build
+    startCommand: cd backend && npm run prisma:deploy:postgres && npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRADING_MODE
+        value: paper
+      - key: RUN_WORKERS_ON_START
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradepilot-ai-scanner-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tradepilot-redis
+          property: connectionString
+      - key: FRONTEND_URL
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        sync: false
+      - key: APP_OWNER_EMAIL
+        value: rayanntchamba@gmail.com
+      - key: APP_AUTH_SECRET
+        generateValue: true
+      - key: APP_AUTH_TOKEN_HOURS
+        value: "12"
+      - key: APP_ENABLE_PASSCODE_LOGIN
+        value: "false"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: APP_EMAIL_FROM
+        sync: false
+      - key: AI_PRIMARY_PROVIDER
+        value: mistral
+      - key: AI_PROVIDER
+        value: mistral
+      - key: AI_FALLBACK_PROVIDER
+        value: openai
+      - key: AI_FALLBACK_ENABLED
+        value: "true"
+      - key: TECHNICAL_FALLBACK_ENABLED
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_MODEL
+        value: mistral-small-latest
+      - key: LOCAL_MODEL_PROVIDER
+        value: none
+      - key: LOCAL_MODEL_BASE_URL
+        sync: false
+      - key: LOCAL_MODEL_API_KEY
+        sync: false
+      - key: LOCAL_MODEL_MODEL
+        sync: false
+      - key: OLLAMA_ENABLED
+        value: "false"
+      - key: OLLAMA_BASE_URL
+        value: http://localhost:11434
+      - key: OLLAMA_MODEL
+        value: qwen2.5:7b
+      - key: AI_MAX_CALLS_PER_HOUR
+        value: "10"
+      - key: AI_MAX_CALLS_PER_DAY
+        value: "100"
+      - key: AI_CACHE_MINUTES
+        value: "60"
+      - key: AI_REQUEST_TIMEOUT_SECONDS
+        value: "30"
+      - key: AI_MAX_RETRIES
+        value: "2"
+      - key: AI_RETRY_BASE_DELAY_SECONDS
+        value: "2"
+      - key: AI_MIN_SIGNAL_SCORE
+        value: "85"
+      - key: AI_DAILY_BUDGET_USD
+        value: "2"
+      - key: AI_ALLOW_TECHNICAL_ONLY
+        value: "true"
+      - key: AI_REQUIRE_JSON_RESPONSE
+        value: "true"
+      - key: ALPACA_TRADING_ENV
+        value: paper
+      - key: ALPACA_TRADING_BASE_URL
+        value: https://paper-api.alpaca.markets/v2
+      - key: ALPACA_AUTH_MODE
+        value: api_key
+      - key: ALPACA_API_KEY_ID
+        sync: false
+      - key: ALPACA_API_SECRET_KEY
+        sync: false
+      - key: ALPACA_AUTH_BASE_URL
+        value: https://authx.sandbox.alpaca.markets/v1
+      - key: ALPACA_MARKET_DATA_BASE_URL
+        value: https://data.alpaca.markets
+      - key: ALPACA_STOCK_DATA_FEED
+        value: iex
+      - key: ALLOW_LIVE_BROKER_TRADING
+        value: "false"
+      - key: PAPER_TRADING_ENABLED
+        value: "true"
+      - key: AUTO_SUBMIT_BROKER_PAPER_ORDERS
+        value: "false"
+      - key: NEWS_PROVIDER
+        value: finnhub
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+
+  - type: worker
+    name: tradepilot-worker
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: cd backend && npm ci --include=dev && npm run prisma:generate:postgres && npm run build
+    startCommand: cd backend && npm run prisma:deploy:postgres && npm run worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRADING_MODE
+        value: paper
+      - key: RUN_WORKERS_ON_START
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradepilot-ai-scanner-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tradepilot-redis
+          property: connectionString
+      - key: APP_AUTH_SECRET
+        generateValue: true
+      - key: ALPACA_TRADING_ENV
+        value: paper
+      - key: ALPACA_TRADING_BASE_URL
+        value: https://paper-api.alpaca.markets/v2
+      - key: ALLOW_LIVE_BROKER_TRADING
+        value: "false"
+      - key: PAPER_TRADING_ENABLED
+        value: "true"
+      - key: AUTO_SUBMIT_BROKER_PAPER_ORDERS
+        value: "false"
+      - key: AI_PRIMARY_PROVIDER
+        value: mistral
+      - key: AI_PROVIDER
+        value: mistral
+      - key: AI_FALLBACK_PROVIDER
+        value: openai
+      - key: TECHNICAL_FALLBACK_ENABLED
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+
+databases:
+  - name: tradepilot-ai-scanner-db
+    plan: free
