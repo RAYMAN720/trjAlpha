@@ -31,10 +31,19 @@ function apiCorsForRequest(req: express.Request) {
       return false;
     }
   };
+  const isLoopbackOrigin = (origin?: string) => {
+    if (!origin) return false;
+    try {
+      const hostname = new URL(origin).hostname;
+      return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+    } catch {
+      return false;
+    }
+  };
 
   return cors({
     origin(origin, callback) {
-      if (!origin || origin === sameHostOrigin || originMatchesRequestHost(origin) || allowedOrigins.includes(origin)) {
+      if (!origin || origin === sameHostOrigin || originMatchesRequestHost(origin) || isLoopbackOrigin(origin) || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
       return callback(new Error(`CORS blocked origin: ${origin}`));
