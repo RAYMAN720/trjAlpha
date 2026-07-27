@@ -144,6 +144,336 @@ textarea:focus-visible {
   animation-delay: 240ms;
 }
 
+.maintenance-shell {
+  min-height: 100vh;
+  overflow: hidden;
+  padding: clamp(1rem, 3vw, 2rem);
+  background:
+    linear-gradient(rgba(51, 214, 159, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(51, 214, 159, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 14% 12%, rgba(51, 214, 159, 0.16), transparent 24rem),
+    radial-gradient(circle at 84% 18%, rgba(245, 158, 11, 0.1), transparent 22rem),
+    linear-gradient(135deg, #0f1012 0%, #171419 48%, #10130f 100%);
+  background-size:
+    38px 38px,
+    38px 38px,
+    auto,
+    auto,
+    auto;
+}
+
+.maintenance-hero,
+.maintenance-section,
+.maintenance-credit {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.maintenance-hero {
+  min-height: min(760px, calc(100vh - 2rem));
+  display: grid;
+  align-content: space-between;
+  gap: 3rem;
+  padding: clamp(1rem, 3vw, 2rem) 0 3rem;
+}
+
+.maintenance-nav,
+.maintenance-brand,
+.maintenance-status-pill,
+.maintenance-actions,
+.section-heading,
+.release-list li,
+.panel-header {
+  display: flex;
+  align-items: center;
+}
+
+.maintenance-nav {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.maintenance-brand {
+  gap: 0.75rem;
+  color: #f6f3eb;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.maintenance-mark,
+.documentation-icon {
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(51, 214, 159, 0.3);
+  border-radius: 8px;
+  background: rgba(51, 214, 159, 0.1);
+  color: #33d69f;
+}
+
+.maintenance-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.maintenance-status-pill,
+.maintenance-actions span {
+  gap: 0.5rem;
+  border: 1px solid rgba(51, 214, 159, 0.24);
+  border-radius: 999px;
+  background: rgba(51, 214, 159, 0.08);
+  color: #33d69f;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.maintenance-status-pill {
+  min-height: 2.5rem;
+  padding: 0 1rem;
+}
+
+.maintenance-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: clamp(1rem, 4vw, 3rem);
+  align-items: end;
+}
+
+.maintenance-copy {
+  max-width: 760px;
+  animation: authPanelIn 560ms ease-out both;
+}
+
+.maintenance-kicker {
+  margin: 0 0 0.85rem;
+  color: #33d69f;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.maintenance-copy h1 {
+  margin: 0;
+  max-width: 780px;
+  color: #f6f3eb;
+  font-size: clamp(3.25rem, 10vw, 8.5rem);
+  font-weight: 900;
+  line-height: 0.9;
+}
+
+.maintenance-lead,
+.maintenance-muted,
+.documentation-card p {
+  color: #b9b2aa;
+  line-height: 1.75;
+}
+
+.maintenance-lead {
+  max-width: 660px;
+  margin: 1.4rem 0 0;
+  font-size: clamp(1rem, 1.7vw, 1.2rem);
+}
+
+.maintenance-actions {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.8rem;
+}
+
+.maintenance-actions span {
+  min-height: 2.35rem;
+  padding: 0 0.9rem;
+}
+
+.maintenance-panel,
+.documentation-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(22, 21, 25, 0.86);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.maintenance-panel {
+  padding: 1.25rem;
+  animation: authPanelIn 660ms ease-out both;
+}
+
+.panel-header {
+  justify-content: space-between;
+  gap: 1rem;
+  color: #f6f3eb;
+  font-weight: 800;
+}
+
+.status-meter {
+  position: relative;
+  height: 0.45rem;
+  overflow: hidden;
+  margin: 1.25rem 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-meter span {
+  position: absolute;
+  inset: 0;
+  width: 72%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #33d69f, #f59e0b);
+}
+
+.status-list {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+}
+
+.status-list div {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.status-list dt {
+  color: #8d8781;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.status-list dd {
+  margin: 0;
+  color: #f6f3eb;
+  font-weight: 800;
+}
+
+.maintenance-section {
+  padding: clamp(2rem, 5vw, 4rem) 0;
+}
+
+.section-heading {
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-heading h2,
+.maintenance-footer-grid h2 {
+  margin: 0;
+  color: #f6f3eb;
+  font-size: clamp(1.75rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.documentation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.documentation-card {
+  padding: 1.1rem;
+}
+
+.documentation-icon {
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 1rem;
+}
+
+.documentation-card h3 {
+  margin: 0 0 0.55rem;
+  color: #f6f3eb;
+  font-size: 1rem;
+}
+
+.documentation-card p,
+.maintenance-muted {
+  margin: 0;
+  font-size: 0.94rem;
+}
+
+.maintenance-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(300px, 1fr);
+  gap: clamp(1rem, 4vw, 3rem);
+  align-items: start;
+}
+
+.release-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-list li {
+  gap: 0.7rem;
+  min-height: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f6f3eb;
+  padding: 0.8rem 0.9rem;
+}
+
+.release-list svg {
+  flex: 0 0 auto;
+  color: #33d69f;
+}
+
+.maintenance-credit {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 0 0.5rem;
+  color: #8d8781;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 860px) {
+  .maintenance-hero {
+    min-height: auto;
+    gap: 2.5rem;
+  }
+
+  .maintenance-nav,
+  .maintenance-hero-grid,
+  .maintenance-footer-grid {
+    align-items: stretch;
+  }
+
+  .maintenance-nav,
+  .maintenance-hero-grid,
+  .maintenance-footer-grid,
+  .maintenance-credit {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .documentation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .maintenance-shell {
+    padding: 1rem;
+  }
+
+  .maintenance-copy h1 {
+    font-size: clamp(3rem, 18vw, 4.8rem);
+  }
+
+  .documentation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @keyframes authPanelIn {
   from {
     opacity: 0;
