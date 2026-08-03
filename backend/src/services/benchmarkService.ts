@@ -1,5 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import type { AssetType } from "./marketDataProvider.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 function levelFor(input: { closedTrades: number; profitFactor: number; maxDrawdown: number; regimesTested: number }) {
   if (input.closedTrades < 30) return "Not enough data";
@@ -14,12 +15,13 @@ function levelFor(input: { closedTrades: number; profitFactor: number; maxDrawdo
 }
 
 async function benchmarkFor(assetType?: AssetType) {
-  const where = assetType ? { assetType } : undefined;
+  const user = await getOrCreateUserSettings();
+  const where = assetType ? { assetType } : {};
   const [trades, performance, scans] = await Promise.all([
-    prisma.paperTrade.findMany({ where: { ...where, status: { not: "Open" } } }),
+    prisma.paperTrade.findMany({ where: { userId: user.id, ...where, status: { not: "Open" } } }),
     assetType
-      ? prisma.strategyPerformance.findFirst({ where: { scope: "assetType", scopeValue: assetType }, orderBy: { updatedAt: "desc" } })
-      : prisma.strategyPerformance.findFirst({ where: { scope: "global", scopeValue: "auto-paper-trading" }, orderBy: { updatedAt: "desc" } }),
+      ? prisma.strategyPerformance.findFirst({ where: { userId: user.id, scope: "assetType", scopeValue: assetType }, orderBy: { updatedAt: "desc" } })
+      : prisma.strategyPerformance.findFirst({ where: { userId: user.id, scope: "global", scopeValue: "auto-paper-trading" }, orderBy: { updatedAt: "desc" } }),
     prisma.marketScan.findMany({ where, orderBy: { scanDate: "desc" }, take: 200 })
   ]);
   const closedTrades = trades.length;

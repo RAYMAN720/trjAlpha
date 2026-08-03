@@ -170,6 +170,16 @@ function sanitizeSymbols(value) {
   return [...new Set(symbols)].slice(0, 100);
 }
 
+function extractBrokerCredential(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const credential = value.brokerCredential;
+  if (!credential || typeof credential !== "object" || Array.isArray(credential)) return undefined;
+  const keyId = String(credential.keyId ?? "").trim();
+  const secretKey = String(credential.secretKey ?? "").trim();
+  if (!keyId || !secretKey || keyId.length > 256 || secretKey.length > 512) return undefined;
+  return { keyId, secretKey };
+}
+
 function normalizeJobRequest(mode, value) {
   const request = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const normalized = {
@@ -188,7 +198,7 @@ function normalizeJobRequest(mode, value) {
   return normalized;
 }
 
-function buildConfig(mode, request, jobDir) {
+function buildConfig(mode, request, jobDir, brokerCredential) {
   const templateName = mode === "BACKTEST" ? "backtest.template.json" : "paper.template.json";
   const config = JSON.parse(readFileSync(join(configDir, templateName), "utf8"));
   const parameters = {
@@ -205,8 +215,8 @@ function buildConfig(mode, request, jobDir) {
     if (String(process.env.ALLOW_LIVE_BROKER_TRADING ?? "false").toLowerCase() === "true") {
       throw new Error("Live-money trading must remain disabled.");
     }
-    const key = process.env.ALPACA_API_KEY_ID ?? "";
-    const secret = process.env.ALPACA_API_SECRET_KEY ?? "";
+    const key = brokerCredential?.keyId ?? process.env.ALPACA_API_KEY_ID ?? "";
+    const secret = brokerCredential?.secretKey ?? process.env.ALPACA_API_SECRET_KEY ?? "";
     if (!key || !secret) throw new Error("Alpaca paper credentials are missing on the LEAN gateway.");
 
     const quantConnectUserId = process.env.QUANTCONNECT_USER_ID ?? "";
@@ -366,11 +376,11 @@ function reconcileRunningJobs() {
 }
 
 function createJob(mode, request) {
+  const brokerCredential = mode === "PAPER" ? extractBrokerCredential(request) : undefined;
   const normalizedRequest = normalizeJobRequest(mode, request);
-  if (mode === "PAPER") {
-    const activePaper = readJobs().find((item) => item.mode === "PAPER" && ["QUEUED", "STARTING", "RUNNING"].includes(item.status));
-    if (activePaper) throw new Error(`A LEAN paper engine is already active (${activePaper.id}).`);
-  }
+  const maxConcurrent = Math.max(1, Number(process.env.LEAN_MAX_CONCURRENT_JOBS ?? 8));
+  const activeCount = readJobs().filter((item) => ["QUEUED", "STARTING", "RUNNING"].includes(item.status)).length;
+  if (activeCount >= maxConcurrent) throw new Error(`LEAN gateway concurrency limit reached (${maxConcurrent}).`);
 
   const id = randomUUID();
   const jobDir = join(runtimeDir, "jobs", id);
@@ -394,7 +404,7 @@ function createJob(mode, request) {
 
   let configPath;
   try {
-    configPath = buildConfig(mode, normalizedRequest, jobDir);
+    configPath = buildConfig(mode, normalizedRequest, jobDir, brokerCredential);
   } catch (error) {
     rmSync(jobDir, { recursive: true, force: true });
     rmSync(resultPath, { recursive: true, force: true });
@@ -448,6 +458,8 @@ const server = createServer(async (req, res) => {
         ok: true,
         app: "TradePilot LEAN Gateway",
         paperOnly: true,
+        multiSession: true,
+        maxConcurrentJobs: Math.max(1, Number(process.env.LEAN_MAX_CONCURRENT_JOBS ?? 8)),
         executionEnabled,
         engineImage: image,
         docker

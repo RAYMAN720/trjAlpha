@@ -1,5 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import type { ProfessionalAssessment, StrategyStatus } from "./professionalEngine.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 function statusFromProof(input: {
   current: StrategyStatus;
@@ -29,9 +30,10 @@ function statusFromProof(input: {
 }
 
 export async function enrichStrategyProof(assessment: ProfessionalAssessment): Promise<ProfessionalAssessment> {
+  const user = await getOrCreateUserSettings();
   const [performance, backtest] = await Promise.all([
     prisma.strategyPerformance.findFirst({
-      where: { scope: "strategy", scopeValue: assessment.strategy.name },
+      where: { userId: user.id, scope: "strategy", scopeValue: assessment.strategy.name },
       orderBy: { updatedAt: "desc" }
     }),
     prisma.backtestResult.findFirst({

@@ -14,14 +14,6 @@ export type UserSettings = {
   realTradingEnabled: boolean;
 };
 
-export type UserProfile = UserSettings & {
-  avatarUrl?: string | null;
-  authProvider: string;
-  createdAt: string;
-  updatedAt: string;
-  lastLoginAt?: string | null;
-};
-
 export type MarketSignal = {
   id: string;
   assetType?: AssetType;

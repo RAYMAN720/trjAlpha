@@ -1,7 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { createAlert } from "./alertService.js";
 import { blockRealTradingAttempt } from "./riskEngineService.js";
-import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 type BrokerEnvironment = "paper" | "live";
 type AlpacaAuthMode = "api_key" | "oauth_client_credentials";
@@ -22,7 +21,6 @@ type BrokerConfig = {
 };
 
 type OrderInput = {
-  userId?: string | null;
   ticker: string;
   side: "buy" | "sell";
   quantity: number;
@@ -155,7 +153,6 @@ async function getAlpacaAuthHeaders(): Promise<Record<string, string>> {
 }
 
 async function updateConnection(data: Partial<{
-  userId: string | null;
   status: string;
   accountNumber: string;
   currency: string;
@@ -165,31 +162,21 @@ async function updateConnection(data: Partial<{
   lastError: string | null;
 }>) {
   const config = getBrokerConfig();
-  const ownerUserId = data.userId ?? (await getOrCreateUserSettings()).id;
-  const existing = await prisma.brokerConnection.findFirst({
+  return prisma.brokerConnection.upsert({
     where: {
-      userId: ownerUserId,
-      provider: config.provider,
-      environment: config.environment
-    }
-  });
-  if (existing) {
-    return prisma.brokerConnection.update({
-      where: { id: existing.id },
-      data: {
-        ...data,
-        userId: ownerUserId,
-        isLive: config.environment === "live",
-        liveTradingAllowed: config.liveTradingAllowed,
-        lastSyncAt: new Date()
+      provider_environment: {
+        provider: config.provider,
+        environment: config.environment
       }
-    });
-  }
-
-  return prisma.brokerConnection.create({
-    data: {
+    },
+    update: {
+      ...data,
+      isLive: config.environment === "live",
+      liveTradingAllowed: config.liveTradingAllowed,
+      lastSyncAt: new Date()
+    },
+    create: {
       provider: config.provider,
-      userId: ownerUserId,
       environment: config.environment,
       status: data.status ?? "Unknown",
       accountNumber: data.accountNumber,
@@ -233,14 +220,14 @@ async function alpacaRequest<T>(path: string, options: { method?: string; body?:
   };
 }
 
-export async function getBrokerStatus(userId?: string | null) {
+export async function getBrokerStatus() {
   const config = getBrokerConfig();
-  const ownerUserId = userId ?? (await getOrCreateUserSettings()).id;
-  const connection = await prisma.brokerConnection.findFirst({
+  const connection = await prisma.brokerConnection.findUnique({
     where: {
-      userId: ownerUserId,
-      provider: config.provider,
-      environment: config.environment
+      provider_environment: {
+        provider: config.provider,
+        environment: config.environment
+      }
     }
   });
 
@@ -259,11 +246,10 @@ export async function getBrokerStatus(userId?: string | null) {
   };
 }
 
-export async function syncBrokerAccount(userId?: string | null) {
+export async function syncBrokerAccount() {
   const config = getBrokerConfig();
   if (!config.configured) {
     const connection = await updateConnection({
-      userId: userId ?? null,
       status: "Missing credentials",
       lastError:
         config.authMode === "oauth_client_credentials"
@@ -276,7 +262,6 @@ export async function syncBrokerAccount(userId?: string | null) {
   try {
     const { data, requestId } = await alpacaRequest<Record<string, string>>("/v2/account");
     const connection = await updateConnection({
-      userId: userId ?? null,
       status: data.status ?? "Unknown",
       accountNumber: data.account_number,
       currency: data.currency,
@@ -294,7 +279,6 @@ export async function syncBrokerAccount(userId?: string | null) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Broker sync failed.";
     const connection = await updateConnection({
-      userId: userId ?? null,
       status: "Error",
       lastError: message
     });
@@ -339,7 +323,6 @@ export async function submitBrokerOrder(input: OrderInput) {
     return prisma.brokerOrder.create({
       data: {
         provider: config.provider,
-        userId: input.userId ?? null,
         environment: config.environment,
         ticker: input.ticker.toUpperCase(),
         side: input.side,
@@ -364,7 +347,6 @@ export async function submitBrokerOrder(input: OrderInput) {
     return prisma.brokerOrder.create({
       data: {
         provider: config.provider,
-        userId: input.userId ?? null,
         environment: config.environment,
         ticker: input.ticker.toUpperCase(),
         side: input.side,
@@ -394,7 +376,6 @@ export async function submitBrokerOrder(input: OrderInput) {
     const order = await prisma.brokerOrder.create({
       data: {
         provider: config.provider,
-        userId: input.userId ?? null,
         environment: config.environment,
         brokerOrderId: String(data.id ?? ""),
         ticker: input.ticker.toUpperCase(),
@@ -416,7 +397,6 @@ export async function submitBrokerOrder(input: OrderInput) {
     });
 
     await createAlert({
-      userId: input.userId,
       ticker: order.ticker,
       alertType: "broker paper order submitted",
       severity: "Info",
@@ -427,7 +407,6 @@ export async function submitBrokerOrder(input: OrderInput) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Broker order failed.";
     await createAlert({
-      userId: input.userId,
       ticker: input.ticker.toUpperCase(),
       alertType: "broker order failed",
       severity: "Warning",
@@ -437,7 +416,6 @@ export async function submitBrokerOrder(input: OrderInput) {
     return prisma.brokerOrder.create({
       data: {
         provider: config.provider,
-        userId: input.userId ?? null,
         environment: config.environment,
         ticker: input.ticker.toUpperCase(),
         side: input.side,
@@ -458,12 +436,12 @@ export async function submitBrokerOrder(input: OrderInput) {
   }
 }
 
-export async function submitBrokerOrderFromTradePlan(tradePlanId: string, userId?: string | null) {
+export async function submitBrokerOrderFromTradePlan(tradePlanId: string) {
   if ((process.env.TRADING_ENGINE ?? "native").toLowerCase() === "lean") {
     throw new Error("Direct TradePilot broker submission is disabled because QuantConnect LEAN owns order execution.");
   }
 
-  const plan = await prisma.tradePlan.findFirst({ where: { id: tradePlanId, ...(userId ? { userId } : {}) } });
+  const plan = await prisma.tradePlan.findUnique({ where: { id: tradePlanId } });
   if (!plan) {
     throw new Error("Trade plan not found.");
   }
@@ -473,7 +451,6 @@ export async function submitBrokerOrderFromTradePlan(tradePlanId: string, userId
   }
 
   return submitBrokerOrder({
-    userId,
     ticker: plan.ticker,
     side: "buy",
     quantity: plan.quantity,
@@ -486,9 +463,8 @@ export async function submitBrokerOrderFromTradePlan(tradePlanId: string, userId
   });
 }
 
-export async function getBrokerOrders(userId?: string | null) {
+export async function getBrokerOrders() {
   return prisma.brokerOrder.findMany({
-    where: { userId: userId ?? null },
     orderBy: { createdAt: "desc" },
     take: 100
   });

@@ -3,6 +3,7 @@ import type { AssetType } from "../marketDataProvider.js";
 import { cryptoPlaybooks } from "./cryptoPlaybooks.js";
 import type { PlaybookDefinition, PlaybookStatus, StrategyProofLevel } from "./playbookTypes.js";
 import { stockPlaybooks } from "./stockPlaybooks.js";
+import { getOrCreateUserSettings } from "../userSettingsService.js";
 
 export function getPlaybookDefinitions(assetType?: AssetType) {
   const all = [...stockPlaybooks, ...cryptoPlaybooks];
@@ -31,13 +32,14 @@ function proofLevel(input: {
 }
 
 async function decoratePlaybook(playbook: PlaybookDefinition): Promise<PlaybookStatus> {
+  const user = await getOrCreateUserSettings();
   const [performance, trades] = await Promise.all([
     prisma.strategyPerformance.findFirst({
-      where: { scope: "assetType", scopeValue: playbook.assetType },
+      where: { userId: user.id, scope: "assetType", scopeValue: playbook.assetType },
       orderBy: { updatedAt: "desc" }
     }),
     prisma.paperTrade.findMany({
-      where: { assetType: playbook.assetType, status: { not: "Open" } },
+      where: { userId: user.id, assetType: playbook.assetType, status: { not: "Open" } },
       orderBy: { closedAt: "desc" },
       take: 10
     })

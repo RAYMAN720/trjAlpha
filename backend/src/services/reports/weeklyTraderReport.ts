@@ -1,5 +1,6 @@
 import { prisma } from "../../utils/prisma.js";
 import { getBenchmarkStatus } from "../benchmarkService.js";
+import { getOrCreateUserSettings } from "../userSettingsService.js";
 
 function weekStart() {
   const date = new Date();
@@ -14,9 +15,10 @@ function profitFactor(wins: number, losses: number) {
 
 export async function generateWeeklyTraderReport() {
   const since = weekStart();
+  const user = await getOrCreateUserSettings();
   const [trades, riskEvents, benchmark] = await Promise.all([
-    prisma.paperTrade.findMany({ where: { openedAt: { gte: since } }, orderBy: { openedAt: "desc" } }),
-    prisma.riskEvent.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" } }),
+    prisma.paperTrade.findMany({ where: { userId: user.id, openedAt: { gte: since } }, orderBy: { openedAt: "desc" } }),
+    prisma.riskEvent.findMany({ where: { userId: user.id, createdAt: { gte: since } }, orderBy: { createdAt: "desc" } }),
     getBenchmarkStatus()
   ]);
   const closed = trades.filter((trade) => trade.status !== "Open");

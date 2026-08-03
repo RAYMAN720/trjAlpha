@@ -41,7 +41,6 @@ import type {
   TradeChartMarker,
   TradePlan,
   UserSettings,
-  UserProfile,
   WeeklyTraderReport,
   WatchlistItem
 } from "./types";
@@ -55,6 +54,7 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  headers?: Record<string, string>;
 };
 
 function marketQuery(market?: MarketMode) {
@@ -69,15 +69,19 @@ export type AuthSession = {
   ok: boolean;
   userId: string;
   email: string;
+  role: string;
   displayName: string;
   expiresAt: string;
 };
 
 export type LoginResponse = {
-  token: string;
-  expiresAt: string;
+  token?: string;
+  expiresAt?: string;
   displayName: string;
-  email: string;
+  userId?: string;
+  role?: string;
+  mfaRequired?: boolean;
+  mfaToken?: string;
 };
 
 export type LoginCodeResponse = {
@@ -100,11 +104,21 @@ export function clearAuthToken() {
   safeRemoveItem(AUTH_TOKEN_KEY);
 }
 
+export function professionalRealtimeUrl(ticket: string) {
+  const apiUrl = new URL(API_BASE, window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+  apiUrl.pathname = "/ws";
+  apiUrl.search = `?ticket=${encodeURIComponent(ticket)}`;
+  apiUrl.hash = "";
+  return apiUrl.toString();
+}
+
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = options.auth === false ? null : getStoredAuthToken();
   const headers: Record<string, string> = {};
   if (options.body) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
+  Object.assign(headers, options.headers ?? {});
 
   const response = await fetch(`${API_BASE}${path}`, {
     method: options.method ?? "GET",
@@ -126,12 +140,27 @@ export const api = {
   health: () => apiRequest<{ ok: boolean; mode: string; realTradingEnabled: boolean }>("/health"),
   login: (passcode: string) => apiRequest<LoginResponse>("/auth/login", { method: "POST", body: { passcode }, auth: false }),
   requestLoginCode: (email: string) => apiRequest<LoginCodeResponse>("/auth/code/request", { method: "POST", body: { email }, auth: false }),
-  register: (body: { name: string; email: string }) => apiRequest<LoginCodeResponse>("/auth/register", { method: "POST", body, auth: false }),
-  verifyLoginCode: (code: string, email: string) => apiRequest<LoginResponse>("/auth/code/verify", { method: "POST", body: { code, email }, auth: false }),
-  googleLogin: (credential: string) => apiRequest<LoginResponse>("/auth/google", { method: "POST", body: { credential }, auth: false }),
+  verifyLoginCode: (email: string, code: string, name?: string) => apiRequest<LoginResponse>("/auth/code/verify", { method: "POST", body: { email, code, name }, auth: false }),
+  verifyMfaLogin: (mfaToken: string, code: string) => apiRequest<LoginResponse>("/auth/mfa/verify", { method: "POST", body: { mfaToken, code }, auth: false }),
+  logout: () => apiRequest<void>("/auth/logout", { method: "POST" }),
   session: () => apiRequest<AuthSession>("/auth/session"),
-  profile: () => apiRequest<UserProfile>("/profile"),
-  updateProfile: (body: Partial<UserProfile>) => apiRequest<UserProfile>("/profile", { method: "PUT", body }),
+  professionalCapabilities: () => apiRequest<Record<string, unknown>>("/v4/capabilities"),
+  professionalMe: () => apiRequest<Record<string, unknown>>("/v4/me"),
+  professionalRealtimeTicket: () => apiRequest<{ ticket: string; expiresInSeconds: number; websocketPath: string }>("/v4/realtime/ticket", { method: "POST", body: {} }),
+  professionalPortfolios: () => apiRequest<Array<Record<string, unknown>>>("/v4/portfolios"),
+  professionalCreatePortfolio: (body: { name: string; type?: string; baseCurrency?: string }) => apiRequest<Record<string, unknown>>("/v4/portfolios", { method: "POST", body }),
+  professionalBrokers: () => apiRequest<Array<Record<string, unknown>>>("/v4/brokers"),
+  professionalConnectAlpaca: (body: { portfolioId: string; environment: "paper" | "live"; keyId: string; secretKey: string; accountLabel?: string }) => apiRequest<Record<string, unknown>>("/v4/brokers/alpaca", { method: "POST", body }),
+  professionalReconcileBroker: (brokerAccountId: string) => apiRequest<Record<string, unknown>>(`/v4/brokers/${brokerAccountId}/reconcile`, { method: "POST", body: {} }),
+  professionalOrders: (portfolioId?: string) => apiRequest<Array<Record<string, unknown>>>(`/v4/orders${portfolioId ? `?portfolioId=${encodeURIComponent(portfolioId)}` : ""}`),
+  professionalCreateOrder: (body: Record<string, unknown>, idempotencyKey = crypto.randomUUID()) => apiRequest<Record<string, unknown>>("/v4/orders", { method: "POST", body, headers: { "Idempotency-Key": idempotencyKey } }),
+  professionalCancelOrder: (orderId: string) => apiRequest<Record<string, unknown>>(`/v4/orders/${orderId}/cancel`, { method: "POST", body: {} }),
+  professionalSyncOrder: (orderId: string) => apiRequest<Record<string, unknown>>(`/v4/orders/${orderId}/sync`, { method: "POST", body: {} }),
+  professionalStrategies: () => apiRequest<Array<Record<string, unknown>>>("/v4/strategies"),
+  professionalCreateStrategy: (body: { name: string; description?: string }) => apiRequest<Record<string, unknown>>("/v4/strategies", { method: "POST", body }),
+  professionalCreateStrategyVersion: (strategyId: string, body: Record<string, unknown>) => apiRequest<Record<string, unknown>>(`/v4/strategies/${strategyId}/versions`, { method: "POST", body }),
+  professionalLeanJobs: () => apiRequest<Array<Record<string, unknown>>>("/v4/lean/jobs"),
+  professionalQueueLeanJob: (body: Record<string, unknown>) => apiRequest<Record<string, unknown>>("/v4/lean/jobs", { method: "POST", body }),
   settings: () => apiRequest<UserSettings>("/settings"),
   updateSettings: (body: Partial<UserSettings>) => apiRequest<UserSettings>("/settings", { method: "PUT", body }),
   dashboard: (market: MarketMode) => apiRequest<AssetDashboard>(`${marketPrefix(market)}/dashboard`),

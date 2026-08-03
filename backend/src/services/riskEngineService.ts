@@ -28,11 +28,12 @@ export async function evaluatePaperTradeRisk(input: {
 }): Promise<RiskEvaluation> {
   const user = await getOrCreateUserSettings();
   const assetType = input.assetType ?? "stock";
-  const openTrades = await prisma.paperTrade.count({ where: { assetType, status: "Open" } });
+  const openTrades = await prisma.paperTrade.count({ where: { userId: user.id, assetType, status: "Open" } });
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const closedToday = await prisma.paperTrade.findMany({
     where: {
+      userId: user.id,
       closedAt: { gte: todayStart },
       assetType
     }
@@ -121,6 +122,7 @@ export async function evaluatePaperTradeRisk(input: {
   if (evaluation.blocked) {
     await prisma.riskEvent.create({
       data: {
+        userId: user.id,
         assetType,
         ticker: input.stock.ticker,
         rule: "auto-paper-trade-guardrails",
@@ -157,8 +159,10 @@ export async function evaluatePaperTradeRisk(input: {
 
 export async function blockRealTradingAttempt(context: Record<string, unknown>) {
   const assetType: AssetType = context.assetType === "crypto" ? "crypto" : "stock";
+  const user = await getOrCreateUserSettings();
   await prisma.riskEvent.create({
     data: {
+      userId: user.id,
       assetType,
       ticker: "SYSTEM",
       rule: "real-trading-disabled",

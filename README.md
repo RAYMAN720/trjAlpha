@@ -1,39 +1,37 @@
-# TradePilot LEAN Edition
+# TradePilot Professional v4
 
-TradePilot remains the React/TypeScript product, research, authentication, safety, reporting, and mobile dashboard. The trading engine is now **QuantConnect LEAN**, running the same event-driven C# algorithm for historical backtests and Alpaca paper execution.
+> **Professional architecture:** this repository now contains the v4 multi-user trading/investment core while preserving the existing LEAN scanner/research experience. Read [PROFESSIONAL_V4.md](./PROFESSIONAL_V4.md), [IMPLEMENTATION_MATRIX.md](./IMPLEMENTATION_MATRIX.md), and [MIGRATION_V4.md](./MIGRATION_V4.md) first.
 
 ## Architecture
 
 ```text
-Frontend container (React + Nginx)
-      ↓ /api proxy
-Backend container (Node.js / Express / TypeScript API)
+React web terminal
+      ↓ HTTPS / ticketed WebSocket
+Node.js / Express Professional API
       ↓
-Worker container (automation jobs)
+Identity · Portfolio · Ledger · OMS · Risk · Broker adapters
+      ↓                    ↓
+PostgreSQL + Redis       Alpaca (per-user account)
       ↓
-Postgres + Redis
-      ↓ authenticated HTTP
-LEAN Gateway container (dry-run by default)
-      ↓ optional Docker jobs
-Official QuantConnect LEAN engine + TradePilotLeanAlgorithm.dll
+LEAN job queue + reconciliation + automation workers
       ↓
-Historical data for backtests / Alpaca paper brokerage for paper execution
+Private LEAN gateway pool
+      ↓
+Official QuantConnect LEAN containers
 ```
 
 ### Responsibility split
 
 | Component | Responsibility |
 |---|---|
-| React frontend | Dashboard, LEAN jobs, research, risk visibility, paper-trading views, and emergency controls |
-| TypeScript API | Users, AI/news research, audit records, configuration, gateway adapter |
-| Worker | Scheduled scans, research jobs, paper trade updates, learning and risk checks |
-| Postgres | Persistent application data |
-| Redis | Queue/cache-ready service for worker expansion |
-| LEAN gateway | Authenticated job lifecycle, Docker isolation, paper-only enforcement |
-| LEAN engine | Market events, portfolio accounting, orders, fills, fees, brokerage models, calendars, corporate actions, results |
+| React frontend | Professional control plane, order ticket, portfolios, LEAN jobs, research, risk and analytics |
+| TypeScript API | Identity/MFA/sessions, portfolio accounting, OMS, risk, broker abstraction, market data, research and audit |
+| Workers | LEAN dispatch, broker/order reconciliation and legacy scanner automation without duplicating cron jobs across API replicas |
+| LEAN gateway | Authenticated multi-job Docker lifecycle, isolation and paper-only enforcement |
+| LEAN engine | Strategy market events, brokerage simulation/paper execution, fills, calendars, corporate actions and results |
 | C# algorithm | Trend Breakout V2 signal, sizing, portfolio circuit breakers, protective orders and exits |
 
-The old Python service is removed. The default app mode is `TRADING_ENGINE=native`, which lets the TypeScript automation worker open simulated paper trades after the scanner, research, and risk checks pass. `TRADING_ENGINE=lean` is still available for a stricter LEAN-only setup, but it should only be used when a LEAN gateway is configured and execution is intentionally enabled for paper jobs.
+The old Python service is removed. Manual v4 orders use the OMS directly and do not launch LEAN. Algorithmic/backtest/paper strategy jobs use the LEAN worker/gateway path. Legacy environment-level broker execution is retained only for operator compatibility and is blocked for normal users.
 
 ## What “full LEAN” means here
 
@@ -43,14 +41,15 @@ See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Safety
 
-This edition is intentionally paper-only:
+LEAN strategy execution remains intentionally paper-only. The canonical manual OMS has a separate fail-closed live path:
 
-- `ALLOW_LIVE_BROKER_TRADING=false` is checked by both the TradePilot API and LEAN gateway.
-- The paper template fixes `alpaca-environment` to `paper`.
-- The gateway refuses to start execution when the live-money flag is enabled.
+- `ALLOW_LIVE_BROKER_CONNECTIONS=false` blocks creating live broker connections by default.
+- `ALLOW_LIVE_BROKER_TRADING=false` blocks live order execution by default.
+- Enabling a live account also requires user MFA and explicit per-account permission.
+- The LEAN paper template fixes `alpaca-environment` to `paper` and the gateway refuses live-money LEAN execution.
 - A minimum-length gateway token is required when Docker execution is enabled.
-- Only one LEAN paper session may be active.
-- Real broker/live-money submission remains blocked unless every explicit paper-only guard is changed.
+- Multiple isolated LEAN jobs are allowed only up to `LEAN_MAX_CONCURRENT_JOBS`.
+- Legacy environment-level broker endpoints are operator-only.
 
 These controls reduce configuration mistakes, but they are not a guarantee of profitability or operational safety.
 
@@ -80,15 +79,15 @@ All values can be changed through LEAN job parameters without maintaining separa
 
 ## Requirements
 
-- Node.js 22 for non-Docker local development
-- Docker Engine and Docker Compose
+- Node.js 22
+- Docker Engine
 - A machine that stays online for paper trading
 - PostgreSQL for production TradePilot data
 - Alpaca **paper** API credentials for paper execution
 - QuantConnect user/API/organization credentials and any required local brokerage-module entitlement for the official Alpaca plug-in
 - LEAN-compatible historical US-equity data for local backtests
 
-The Docker Compose stack runs the LEAN gateway in safe dry-run mode by default. If you later enable real LEAN Docker job execution, run that gateway on a secured Docker host and bind the Docker socket intentionally.
+The LEAN gateway should run directly on the Docker host. This avoids Docker-socket bind-path problems that occur when a container tries to launch sibling containers with host file mounts.
 
 ## Installation
 
@@ -129,56 +128,6 @@ The gateway mounts that directory into `/Lean/Data` as read-only. Backtests fail
 
 ## Start locally
 
-### Docker stack
-
-The preferred local setup mirrors the previous separated-service project:
-
-```bash
-npm run docker:up
-```
-
-Open:
-
-```text
-http://127.0.0.1:8180
-```
-
-Services:
-
-| Service | Port | Notes |
-|---|---:|---|
-| `frontend` | `8180` | Nginx serves the React maintenance page and proxies `/api` to backend |
-| `backend` | `8000` | Express API, Prisma, paper-only safety layer |
-| `worker` | internal | Runs automation jobs separately from the API |
-| `postgres` | internal | Local persistent database |
-| `redis` | internal | Queue/cache-ready service |
-| `lean-gateway` | `8190` | Dry-run LEAN job controller by default |
-
-Useful commands:
-
-```bash
-npm run docker:build
-npm run docker:up:detached
-npm run docker:logs
-npm run docker:down
-```
-
-The Docker stack uses Postgres:
-
-```env
-DATABASE_URL=postgresql://tradepilot:tradepilot@postgres:5432/tradepilot?schema=public
-```
-
-Real-money trading remains disabled in the compose file:
-
-```env
-ALLOW_LIVE_BROKER_TRADING=false
-ALPACA_TRADING_ENV=paper
-AUTO_SUBMIT_BROKER_PAPER_ORDERS=false
-```
-
-### Manual local development
-
 Terminal 1 — backend:
 
 ```bash
@@ -202,7 +151,21 @@ cd lean-gateway
 npm start
 ```
 
-Open the dashboard and select **LEAN Engine**.
+Terminal 4 — LEAN queue worker:
+
+```bash
+npm run dev:lean-worker
+```
+
+Terminal 5 — broker/order reconciliation worker:
+
+```bash
+npm run dev:reconcile-worker
+```
+
+For local legacy scanner scheduling, either leave `RUN_WORKERS_ON_START=true` on the single API process or run `npm run dev:automation-worker` with `RUN_WORKERS_ON_START=false`. In production, always use the dedicated automation worker.
+
+Open the dashboard and select **Platform** for the v4 multi-user control plane; the existing LEAN views remain available for engine operations.
 
 The gateway defaults to dry-run mode:
 
@@ -229,34 +192,38 @@ ALLOW_LIVE_BROKER_TRADING=false
 
 ## Production deployment
 
-### Recommended
+The included `deploy/docker-compose.pro.yml` separates the web/API process from the LEAN, reconciliation and automation workers and provisions PostgreSQL + Redis. `render.yaml` follows the same process separation.
 
-Use an always-on Docker VPS for:
+Recommended production roles:
 
-- LEAN gateway
-- LEAN job containers
-- Historical data storage
-- Alpaca paper session
+- React frontend/reverse proxy
+- 2+ stateless TypeScript API replicas with `RUN_WORKERS_ON_START=false`
+- managed PostgreSQL
+- managed Redis
+- one or more LEAN queue workers
+- one reconciliation worker (scale carefully; reconciliation is account-oriented)
+- one legacy automation worker
+- private LEAN gateway hosts + isolated LEAN containers
 
-Use Render or the same VPS for the React frontend, TypeScript API, and PostgreSQL.
-
-The API needs:
+The API and workers must share the same production data-encryption key version. A minimum baseline is:
 
 ```env
-TRADING_ENGINE=native
+NODE_ENV=production
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+APP_AUTH_SECRET=...
+APP_DATA_ENCRYPTION_KEY=...
+APP_DATA_ENCRYPTION_KEY_VERSION=v1
+RUN_WORKERS_ON_START=false
+LEAN_ENGINE_URL=https://your-private-lean-gateway.example
+LEAN_ENGINE_TOKEN=the-shared-secret
+ALLOW_LIVE_BROKER_CONNECTIONS=false
 ALLOW_LIVE_BROKER_TRADING=false
 ```
 
-To use LEAN as the paper execution authority instead of the native simulator, set `TRADING_ENGINE=lean` and also configure:
+Protect LEAN gateways with a private network/firewall, TLS, allow-listing and the bearer token. Do not expose the Docker socket or a gateway directly to the public internet. Apply `deploy/postgres-ledger-immutability.sql` after schema deployment. See `deploy/PRODUCTION_CHECKLIST.md` and `deploy/ENVIRONMENTS.md` before a live pilot.
 
-```env
-LEAN_ENGINE_URL=https://your-private-lean-gateway.example
-LEAN_ENGINE_TOKEN=the-shared-secret
-```
-
-Protect the gateway with a firewall, TLS reverse proxy, IP allow-list, and its bearer token. Do not expose the Docker socket or the gateway directly to the public internet.
-
-A systemd template is provided at:
+A systemd template for a LEAN gateway host remains available at:
 
 ```text
 deploy/tradepilot-lean-gateway.service

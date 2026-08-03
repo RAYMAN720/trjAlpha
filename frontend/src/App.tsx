@@ -14,9 +14,9 @@ import { LearningDashboardPage } from "./pages/LearningDashboardPage";
 import { LivePaperTradingPage } from "./pages/LivePaperTradingPage";
 import { NewsPage } from "./pages/NewsPage";
 import { PaperTradingPage } from "./pages/PaperTradingPage";
+import { PlatformPage } from "./pages/PlatformPage";
 import { PlaybooksPage } from "./pages/PlaybooksPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
-import { ProfilePage } from "./pages/ProfilePage";
 import { ProfessionalDeskPage } from "./pages/ProfessionalDeskPage";
 import { ReportsCenterPage } from "./pages/ReportsCenterPage";
 import { ScannerPage } from "./pages/ScannerPage";
@@ -64,6 +64,7 @@ export default function App() {
             <Route path="/crypto/learning" element={<CryptoRoutes><LearningDashboardPage /></CryptoRoutes>} />
             <Route path="/crypto/alerts" element={<CryptoRoutes><AlertsCenterPage /></CryptoRoutes>} />
             <Route path="/crypto/reports" element={<CryptoRoutes><ReportsCenterPage /></CryptoRoutes>} />
+            <Route path="/platform" element={<PlatformPage />} />
             <Route path="/professional" element={<ProfessionalDeskPage />} />
             <Route path="/lean" element={<LeanEnginePage />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />
@@ -84,7 +85,6 @@ export default function App() {
             <Route path="/portfolio" element={<PortfolioPage />} />
             <Route path="/news" element={<NewsPage />} />
             <Route path="/journal" element={<JournalPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

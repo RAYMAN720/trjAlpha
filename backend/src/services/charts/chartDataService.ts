@@ -1,6 +1,7 @@
 import { prisma } from "../../utils/prisma.js";
 import { marketDataProvider, marketForAssetType, normalizeAssetType } from "../marketDataProvider.js";
 import { reconcilePaperAccount } from "../paperAccountService.js";
+import { currentUserId } from "../../utils/requestContext.js";
 
 export type CandleTimeframe = "5m" | "15m" | "1h" | "4h" | "1d";
 
@@ -118,13 +119,14 @@ export async function getChartMarkers(assetTypeInput: string, symbolInput: strin
   await reconcilePaperAccount(undefined, { createSnapshot: false });
   const assetType = normalizeAssetType(assetTypeInput);
   const symbol = symbolInput.toUpperCase();
+  const userId = currentUserId();
   const [savedMarkers, trades] = await Promise.all([
     prisma.tradeChartMarker.findMany({
-      where: { assetType, symbol },
+      where: { assetType, symbol, position: { account: { userId } } },
       orderBy: { time: "asc" }
     }),
     prisma.paperTrade.findMany({
-      where: { assetType, ticker: symbol },
+      where: { userId, assetType, ticker: symbol },
       orderBy: { openedAt: "asc" }
     })
   ]);
@@ -176,8 +178,9 @@ export async function getPositionLines(assetTypeInput: string, symbolInput: stri
   await reconcilePaperAccount(undefined, { createSnapshot: false });
   const assetType = normalizeAssetType(assetTypeInput);
   const symbol = symbolInput.toUpperCase();
+  const userId = currentUserId();
   const position = await prisma.paperPosition.findFirst({
-    where: { assetType, symbol, status: "Open" },
+    where: { assetType, symbol, status: "Open", account: { userId } },
     orderBy: { openedAt: "desc" }
   });
 

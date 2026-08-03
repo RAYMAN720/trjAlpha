@@ -42,7 +42,7 @@ function positiveEnvNumber(name: string, fallback: number) {
 export async function getAdvancedRiskStatus(assetType?: AssetType) {
   const user = await getOrCreateUserSettings();
   const normalizedAssetType = assetType ? normalizeAssetType(assetType) : undefined;
-  const where = normalizedAssetType ? { assetType: normalizedAssetType } : undefined;
+  const where = { userId: user.id, ...(normalizedAssetType ? { assetType: normalizedAssetType } : {}) };
   const now = new Date();
   const dayStart = normalizedAssetType ? getTradingSessionStart(normalizedAssetType, now) : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const weekStart = startOfWeek(now);
@@ -53,8 +53,8 @@ export async function getAdvancedRiskStatus(assetType?: AssetType) {
     prisma.paperTrade.findMany({ where: { ...where, status: { not: "Open" }, closedAt: { gte: weekStart } } }),
     prisma.paperTrade.findMany({ where: { ...where, status: { not: "Open" }, closedAt: { not: null } }, orderBy: { closedAt: "desc" }, take: 20 }),
     prisma.paperTrade.count({ where: { ...where, openedAt: { gte: dayStart } } }),
-    prisma.paperAccount.findFirst({ orderBy: { updatedAt: "desc" } }),
-    prisma.equitySnapshot.aggregate({ _max: { totalEquity: true } })
+    prisma.paperAccount.findUnique({ where: { userId: user.id } }),
+    prisma.equitySnapshot.aggregate({ where: { account: { userId: user.id } }, _max: { totalEquity: true } })
   ]);
 
   const dailyPl = closedToday.reduce((total, trade) => total + trade.profitLoss, 0);

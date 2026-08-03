@@ -13,7 +13,7 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: RUN_WORKERS_ON_START
-        value: "true"
+        value: "false"
       - key: DATABASE_URL
         fromDatabase:
           name: tradepilot-ai-scanner-db
@@ -22,14 +22,18 @@ services:
         value: owner@example.com
       - key: APP_AUTH_SECRET
         generateValue: true
+      - key: APP_DATA_ENCRYPTION_KEY
+        generateValue: true
+      - key: APP_DATA_ENCRYPTION_KEY_VERSION
+        value: v1
+      - key: REDIS_URL
+        sync: false
+      - key: API_RATE_LIMIT_PER_MINUTE
+        value: "300"
       - key: APP_AUTH_TOKEN_HOURS
         value: "12"
       - key: APP_ENABLE_PASSCODE_LOGIN
         value: "false"
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: VITE_GOOGLE_CLIENT_ID
-        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: APP_EMAIL_FROM
@@ -105,7 +109,9 @@ services:
       - key: PAPER_TRADING_ENABLED
         value: "true"
       - key: TRADING_ENGINE
-        value: native
+        value: lean
+      - key: ALLOW_LIVE_BROKER_CONNECTIONS
+        value: "false"
       - key: ALLOW_LIVE_BROKER_TRADING
         value: "false"
       - key: AUTO_SUBMIT_BROKER_PAPER_ORDERS
@@ -170,6 +176,109 @@ services:
         value: TradePilotLeanAlgorithm
       - key: LEAN_ALGORITHM_VERSION
         value: "1.1.0"
+
+  - type: worker
+    name: tradepilot-lean-worker
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: cd backend && npm ci --include=dev && npm run prisma:generate:postgres && npm run build
+    startCommand: cd backend && npm run start:lean-worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradepilot-ai-scanner-db
+          property: connectionString
+      - key: APP_AUTH_SECRET
+        sync: false
+      - key: APP_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: LEAN_ENGINE_URL
+        sync: false
+      - key: LEAN_ENGINE_TOKEN
+        sync: false
+      - key: LEAN_WORKER_POLL_MS
+        value: "2000"
+
+  - type: worker
+    name: tradepilot-reconciliation-worker
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: cd backend && npm ci --include=dev && npm run prisma:generate:postgres && npm run build
+    startCommand: cd backend && npm run start:reconcile-worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradepilot-ai-scanner-db
+          property: connectionString
+      - key: APP_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: APP_DATA_ENCRYPTION_KEY_VERSION
+        value: v1
+      - key: REDIS_URL
+        sync: false
+      - key: RECONCILIATION_INTERVAL_MS
+        value: "60000"
+
+  - type: worker
+    name: tradepilot-automation-worker
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: cd backend && npm ci --include=dev && npm run prisma:generate:postgres && npm run build
+    startCommand: cd backend && npm run start:automation-worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradepilot-ai-scanner-db
+          property: connectionString
+      - key: REDIS_URL
+        sync: false
+      - key: APP_AUTH_SECRET
+        sync: false
+      - key: APP_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: APP_DATA_ENCRYPTION_KEY_VERSION
+        value: v1
+      - key: RUN_WORKERS_ON_START
+        value: "true"
+      - key: AI_PRIMARY_PROVIDER
+        value: mistral
+      - key: AI_PROVIDER
+        value: mistral
+      - key: AI_FALLBACK_PROVIDER
+        value: openai
+      - key: AI_FALLBACK_ENABLED
+        value: "true"
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_MODEL
+        value: mistral-small-latest
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: ALPACA_API_KEY_ID
+        sync: false
+      - key: ALPACA_API_SECRET_KEY
+        sync: false
+      - key: PAPER_TRADING_ENABLED
+        value: "true"
+      - key: ALLOW_LIVE_BROKER_TRADING
+        value: "false"
 
 databases:
   - name: tradepilot-ai-scanner-db

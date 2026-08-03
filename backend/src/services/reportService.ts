@@ -4,6 +4,7 @@ import { getLearningSummary } from "./learningService.js";
 import { assetTypeForMarket, marketDataProvider, normalizeMarketMode, type MarketMode } from "./marketDataProvider.js";
 import { getDecision, getRiskLevel, scoreStock } from "./scannerService.js";
 import { professionalDecisionLabel } from "./professionalEngine.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 type Source = {
   title: string;
@@ -157,6 +158,7 @@ function toMarkdown(report: Omit<DocumentedInvestmentReport, "markdown">) {
 }
 
 export async function generateDocumentedInvestmentReport(ticker: string, market?: MarketMode): Promise<DocumentedInvestmentReport> {
+  const user = await getOrCreateUserSettings();
   const selectedMarket = normalizeMarketMode(market);
   const assetType = assetTypeForMarket(selectedMarket);
   const symbol = ticker.toUpperCase();
@@ -216,10 +218,10 @@ export async function generateDocumentedInvestmentReport(ticker: string, market?
 
   const [latestAnalysis, latestPlan, riskEvents, learningSummary, openTrade] = await Promise.all([
     prisma.aIAnalysis.findFirst({ where: { symbol }, orderBy: { createdAt: "desc" } }),
-    prisma.tradePlan.findFirst({ where: { ticker: symbol, assetType }, orderBy: { createdAt: "desc" } }),
-    prisma.riskEvent.findMany({ where: { ticker: symbol, assetType }, orderBy: { createdAt: "desc" }, take: 5 }),
+    prisma.tradePlan.findFirst({ where: { userId: user.id, ticker: symbol, assetType }, orderBy: { createdAt: "desc" } }),
+    prisma.riskEvent.findMany({ where: { userId: user.id, ticker: symbol, assetType }, orderBy: { createdAt: "desc" }, take: 5 }),
     getLearningSummary(assetType),
-    prisma.paperTrade.findFirst({ where: { ticker: symbol, assetType, status: "Open" }, orderBy: { openedAt: "desc" } })
+    prisma.paperTrade.findFirst({ where: { userId: user.id, ticker: symbol, assetType, status: "Open" }, orderBy: { openedAt: "desc" } })
   ]);
 
   const score = signal?.score ?? savedReport.aiScore ?? scoreStock(stock);

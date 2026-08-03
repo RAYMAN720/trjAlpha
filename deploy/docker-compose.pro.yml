@@ -1,0 +1,137 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tradepilot
+      POSTGRES_USER: tradepilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradepilot -d tradepilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../backend
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8000
+      DATABASE_URL: postgresql://tradepilot:${POSTGRES_PASSWORD:-change-me}@postgres:5432/tradepilot
+      REDIS_URL: redis://redis:6379
+      APP_AUTH_SECRET: ${APP_AUTH_SECRET}
+      APP_DATA_ENCRYPTION_KEY: ${APP_DATA_ENCRYPTION_KEY}
+      APP_DATA_ENCRYPTION_KEY_VERSION: ${APP_DATA_ENCRYPTION_KEY_VERSION:-v1}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      APP_EMAIL_FROM: ${APP_EMAIL_FROM:-TradePilot <onboarding@resend.dev>}
+      APP_ENABLE_PASSCODE_LOGIN: "false"
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-300}
+      ALLOW_LIVE_BROKER_CONNECTIONS: "false"
+      ALLOW_LIVE_BROKER_TRADING: "false"
+      RUN_WORKERS_ON_START: "false"
+      LEAN_ENGINE_URL: ${LEAN_ENGINE_URL:-http://host.docker.internal:8090}
+      LEAN_ENGINE_TOKEN: ${LEAN_ENGINE_TOKEN:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    command: ["sh", "-c", "npx prisma db push --schema prisma/schema.postgres.prisma && node dist/src/index.js"]
+    restart: unless-stopped
+
+  lean-worker:
+    build:
+      context: ../backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://tradepilot:${POSTGRES_PASSWORD:-change-me}@postgres:5432/tradepilot
+      REDIS_URL: redis://redis:6379
+      APP_DATA_ENCRYPTION_KEY: ${APP_DATA_ENCRYPTION_KEY}
+      APP_DATA_ENCRYPTION_KEY_VERSION: ${APP_DATA_ENCRYPTION_KEY_VERSION:-v1}
+      LEAN_ENGINE_URL: ${LEAN_ENGINE_URL:-http://host.docker.internal:8090}
+      LEAN_ENGINE_TOKEN: ${LEAN_ENGINE_TOKEN:-}
+      LEAN_WORKER_POLL_MS: ${LEAN_WORKER_POLL_MS:-2000}
+      WORKER_ID: lean-worker-compose
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+    command: ["node", "dist/src/workers/leanWorker.js"]
+    restart: unless-stopped
+
+  reconciliation-worker:
+    build:
+      context: ../backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://tradepilot:${POSTGRES_PASSWORD:-change-me}@postgres:5432/tradepilot
+      REDIS_URL: redis://redis:6379
+      APP_DATA_ENCRYPTION_KEY: ${APP_DATA_ENCRYPTION_KEY}
+      APP_DATA_ENCRYPTION_KEY_VERSION: ${APP_DATA_ENCRYPTION_KEY_VERSION:-v1}
+      RECONCILIATION_INTERVAL_MS: ${RECONCILIATION_INTERVAL_MS:-60000}
+      WORKER_ID: reconciliation-worker-compose
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+    command: ["node", "dist/src/workers/reconciliationWorker.js"]
+    restart: unless-stopped
+
+  automation-worker:
+    build:
+      context: ../backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://tradepilot:${POSTGRES_PASSWORD:-change-me}@postgres:5432/tradepilot
+      REDIS_URL: redis://redis:6379
+      APP_AUTH_SECRET: ${APP_AUTH_SECRET}
+      APP_DATA_ENCRYPTION_KEY: ${APP_DATA_ENCRYPTION_KEY}
+      APP_DATA_ENCRYPTION_KEY_VERSION: ${APP_DATA_ENCRYPTION_KEY_VERSION:-v1}
+      RUN_WORKERS_ON_START: "true"
+      AI_PRIMARY_PROVIDER: ${AI_PRIMARY_PROVIDER:-mistral}
+      AI_PROVIDER: ${AI_PROVIDER:-mistral}
+      AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-openai}
+      AI_FALLBACK_ENABLED: ${AI_FALLBACK_ENABLED:-true}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      POLYGON_API_KEY: ${POLYGON_API_KEY:-}
+      ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-}
+      ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-}
+      PAPER_TRADING_ENABLED: "true"
+      ALLOW_LIVE_BROKER_TRADING: "false"
+      WORKER_ID: automation-worker-compose
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+    command: ["node", "dist/src/workers/legacyAutomationWorker.js"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    depends_on: [api]
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,21 @@
+# Production launch checklist
+
+- [ ] PostgreSQL backups and point-in-time recovery verified
+- [ ] Redis persistence/HA selected for required workloads
+- [ ] `APP_AUTH_SECRET` generated in a secrets manager
+- [ ] `APP_DATA_ENCRYPTION_KEY` injected from KMS/secret manager
+- [ ] MFA tested for privileged accounts
+- [ ] TLS/HSTS at edge and WSS tested
+- [ ] Broker credential rotation tested
+- [ ] Order idempotency retry tests passed
+- [ ] Partial-fill and cancellation tests passed
+- [ ] Broker outage/recovery drill passed
+- [ ] Reconciliation mismatch drill passed
+- [ ] Database restore drill passed
+- [ ] API horizontal-scaling load test passed
+- [ ] LEAN worker/gateway concurrency test passed
+- [ ] Security review/penetration test completed
+- [ ] Audit log retention policy configured
+- [ ] Alerting for broker failures, DB errors, queue backlog and reconciliation issues configured
+- [ ] Legal/compliance approval for intended jurisdictions and product behavior completed
+- [ ] Live trading operator flag remains OFF until all required gates are signed off

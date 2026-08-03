@@ -1,8 +1,13 @@
 import { prisma } from "../utils/prisma.js";
+import { currentUserId, getRequestContext } from "../utils/requestContext.js";
 import type { AssetType } from "./marketDataProvider.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
+
+async function alertOwnerId() {
+  return getRequestContext()?.userId ?? (await getOrCreateUserSettings()).id;
+}
 
 export async function createAlert(input: {
-  userId?: string | null;
   assetType?: AssetType;
   ticker?: string;
   alertType: string;
@@ -12,7 +17,7 @@ export async function createAlert(input: {
 }) {
   return prisma.alert.create({
     data: {
-      userId: input.userId,
+      userId: await alertOwnerId(),
       assetType: input.assetType ?? "stock",
       ticker: input.ticker ?? "SYSTEM",
       alertType: input.alertType,
@@ -25,11 +30,8 @@ export async function createAlert(input: {
 }
 
 export async function markAlertRead(id: string) {
-  return prisma.alert.update({
-    where: { id },
-    data: {
-      active: false,
-      readAt: new Date()
-    }
-  });
+  const userId = currentUserId();
+  const owned = await prisma.alert.findFirst({ where: { id, userId } });
+  if (!owned) throw Object.assign(new Error("Alert not found."), { status: 404 });
+  return prisma.alert.update({ where: { id }, data: { active: false, readAt: new Date() } });
 }

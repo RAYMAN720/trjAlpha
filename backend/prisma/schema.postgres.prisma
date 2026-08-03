@@ -11,36 +11,50 @@ model User {
   id                  String   @id @default(cuid())
   name                String
   email               String   @unique
-  avatarUrl           String?
-  authProvider        String   @default("email")
-  googleSubject       String?
+  role                String   @default("USER")
+  emailVerifiedAt     DateTime?
+  mfaEnabled          Boolean  @default(false)
+  mfaSecretEncrypted  String?
   lastLoginAt         DateTime?
+  disabledAt          DateTime?
   demoCapital         Float    @default(500)
   riskPerTradePercent Float    @default(1)
   maxOpenTrades       Int      @default(5)
   maxDailyLossPercent Float    @default(3)
   displayCurrency     String   @default("USD")
   beginnerMode        Boolean  @default(true)
-  autoPaperTrading    Boolean  @default(true)
+  autoPaperTrading    Boolean  @default(false)
   realTradingEnabled  Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
-  tradePlans          TradePlan[]
-  paperTrades         PaperTrade[]
-  brokerConnections   BrokerConnection[]
-  brokerOrders        BrokerOrder[]
+
+  paperAccount        PaperAccount?
+  portfolios          Portfolio[]
+  brokerAccounts      BrokerAccount[]
+  orders              Order[]
+  strategies          Strategy[]
+  auditEvents         AuditEvent[]
+  notifications       Notification[]
   watchlistItems      WatchlistItem[]
   journalEntries      JournalEntry[]
   alerts              Alert[]
-  importedTrades      ImportedTrade[]
-  portfolioSnapshots  PortfolioSnapshot[]
+  authSessions        AuthSession[]
+  idempotencyRecords  IdempotencyRecord[]
+  leanJobs            LeanJobRecord[]
+  tradePlans          TradePlan[]
+  paperTrades         PaperTrade[]
+  riskEvents          RiskEvent[]
+  strategyPerformance StrategyPerformance[]
+  learningInsights    LearningInsight[]
 
-  @@index([googleSubject])
+  @@index([role])
+  @@index([createdAt])
 }
 
 model PaperAccount {
   id                 String           @id @default(cuid())
-  userId             String?
+  userId             String           @unique
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   currency           String           @default("EUR")
   startingBalance    Float            @default(500)
   cashBalance        Float            @default(500)
@@ -64,7 +78,6 @@ model PaperAccount {
   tradeEvents        PaperTradeEvent[]
   equitySnapshots    EquitySnapshot[]
 
-  @@index([userId])
   @@index([updatedAt])
 }
 
@@ -223,7 +236,6 @@ model AgentRun {
 
 model ResearchReport {
   id               String   @id @default(cuid())
-  userId           String?
   assetType        String   @default("stock")
   ticker           String
   companyName      String
@@ -259,14 +271,12 @@ model ResearchReport {
   aiMode             String   @default("TECHNICAL_ONLY")
   createdAt        DateTime @default(now())
 
-  @@index([userId])
   @@index([ticker])
   @@index([assetType])
 }
 
 model AIPrediction {
   id               String    @id @default(cuid())
-  userId           String?
   assetType        String    @default("stock")
   ticker           String
   signalType       String
@@ -284,7 +294,6 @@ model AIPrediction {
   researchReportId String?
   createdAt        DateTime  @default(now())
 
-  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([signalType])
@@ -294,7 +303,6 @@ model AIPrediction {
 
 model DecisionScore {
   id             String   @id @default(cuid())
-  userId         String?
   assetType      String   @default("stock")
   ticker         String
   signalType     String
@@ -307,7 +315,6 @@ model DecisionScore {
   scoringJson    String
   createdAt      DateTime @default(now())
 
-  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([createdAt])
@@ -315,8 +322,8 @@ model DecisionScore {
 
 model TradePlan {
   id              String       @id @default(cuid())
-  userId          String?
-  user            User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType       String       @default("stock")
   ticker          String
   entryPrice      Float
@@ -337,7 +344,7 @@ model TradePlan {
   createdAt       DateTime     @default(now())
   paperTrades     PaperTrade[]
 
-  @@index([userId])
+  @@index([userId, createdAt])
   @@index([ticker])
   @@index([assetType])
   @@index([analysisId])
@@ -346,8 +353,8 @@ model TradePlan {
 
 model PaperTrade {
   id                String    @id @default(cuid())
-  userId            String?
-  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType         String    @default("stock")
   ticker            String
   entryPrice        Float
@@ -373,7 +380,7 @@ model PaperTrade {
   tradePlan         TradePlan? @relation(fields: [tradePlanId], references: [id], onDelete: SetNull)
   events            PaperTradeEvent[]
 
-  @@index([userId])
+  @@index([userId, openedAt])
   @@index([ticker])
   @@index([assetType])
   @@index([status])
@@ -441,8 +448,6 @@ model WorkerLock {
 
 model BrokerConnection {
   id                 String   @id @default(cuid())
-  userId             String?
-  user               User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider           String
   environment        String
   status             String
@@ -458,14 +463,11 @@ model BrokerConnection {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@index([userId])
-  @@index([provider, environment])
+  @@unique([provider, environment])
 }
 
 model BrokerOrder {
   id               String   @id @default(cuid())
-  userId           String?
-  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider         String
   environment      String
   brokerOrderId    String?
@@ -490,7 +492,6 @@ model BrokerOrder {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  @@index([userId])
   @@index([ticker])
   @@index([provider, environment])
   @@index([status])
@@ -498,7 +499,6 @@ model BrokerOrder {
 
 model PaperTradeEvent {
   id           String      @id @default(cuid())
-  userId       String?
   assetType    String      @default("stock")
   accountId    String?
   account      PaperAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
@@ -521,7 +521,6 @@ model PaperTradeEvent {
   message      String
   createdAt    DateTime    @default(now())
 
-  @@index([userId])
   @@index([accountId])
   @@index([positionId])
   @@index([ticker])
@@ -571,8 +570,8 @@ model TradeChartMarker {
 
 model WatchlistItem {
   id          String   @id @default(cuid())
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType   String   @default("stock")
   ticker      String
   companyName String
@@ -582,15 +581,15 @@ model WatchlistItem {
   notes       String?
   createdAt   DateTime @default(now())
 
+  @@unique([userId, assetType, ticker])
   @@index([userId])
-  @@index([ticker])
   @@index([assetType])
 }
 
 model JournalEntry {
   id          String   @id @default(cuid())
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker      String
   decision    String
   entryReason String
@@ -602,13 +601,13 @@ model JournalEntry {
   result      String
   createdAt   DateTime @default(now())
 
-  @@index([userId])
+  @@index([userId, createdAt])
 }
 
 model Alert {
   id          String   @id @default(cuid())
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType   String   @default("stock")
   ticker      String
   alertType   String
@@ -619,7 +618,7 @@ model Alert {
   readAt      DateTime?
   createdAt   DateTime @default(now())
 
-  @@index([userId])
+  @@index([userId, createdAt])
   @@index([ticker])
   @@index([assetType])
   @@index([alertType])
@@ -629,6 +628,8 @@ model Alert {
 model StrategyPerformance {
   id              String   @id @default(cuid())
   userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ownerKey        String   @default("GLOBAL")
   scope           String
   scopeValue      String
   tradeCount      Int      @default(0)
@@ -644,13 +645,14 @@ model StrategyPerformance {
   updatedAt       DateTime @updatedAt
   createdAt       DateTime @default(now())
 
-  @@index([userId])
-  @@index([scope, scopeValue])
+  @@unique([ownerKey, scope, scopeValue])
+  @@index([userId, updatedAt])
 }
 
 model LearningInsight {
   id         String   @id @default(cuid())
   userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType  String   @default("stock")
   title      String
   insight    String
@@ -658,7 +660,7 @@ model LearningInsight {
   category   String
   createdAt  DateTime @default(now())
 
-  @@index([userId])
+  @@index([userId, createdAt])
   @@index([assetType])
   @@index([category])
   @@index([createdAt])
@@ -667,6 +669,7 @@ model LearningInsight {
 model RiskEvent {
   id          String   @id @default(cuid())
   userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   assetType   String   @default("stock")
   ticker      String?
   rule        String
@@ -676,7 +679,7 @@ model RiskEvent {
   contextJson String
   createdAt   DateTime @default(now())
 
-  @@index([userId])
+  @@index([userId, createdAt])
   @@index([ticker])
   @@index([assetType])
   @@index([rule])
@@ -685,7 +688,6 @@ model RiskEvent {
 
 model BacktestResult {
   id              String   @id @default(cuid())
-  userId          String?
   assetType       String   @default("stock")
   strategyName    String
   startDate       DateTime
@@ -697,7 +699,6 @@ model BacktestResult {
   summary         String
   createdAt       DateTime @default(now())
 
-  @@index([userId])
   @@index([strategyName])
   @@index([assetType])
 }
@@ -733,7 +734,6 @@ model MarketRegimeSnapshot {
 
 model ProfessionalDecisionRecord {
   id                     String   @id @default(cuid())
-  userId                 String?
   assetType              String   @default("stock")
   ticker                 String
   strategyName           String
@@ -757,7 +757,6 @@ model ProfessionalDecisionRecord {
   contextJson            String
   createdAt              DateTime @default(now())
 
-  @@index([userId])
   @@index([assetType])
   @@index([ticker])
   @@index([decision])
@@ -768,7 +767,6 @@ model ProfessionalDecisionRecord {
 
 model ExecutionSimulation {
   id                 String   @id @default(cuid())
-  userId             String?
   paperTradeId       String?
   assetType          String   @default("stock")
   ticker             String
@@ -792,7 +790,6 @@ model ExecutionSimulation {
   warningsJson       String
   createdAt          DateTime @default(now())
 
-  @@index([userId])
   @@index([paperTradeId])
   @@index([assetType])
   @@index([ticker])
@@ -802,7 +799,6 @@ model ExecutionSimulation {
 
 model ShadowTrade {
   id                  String    @id @default(cuid())
-  userId              String?
   assetType           String    @default("stock")
   ticker              String
   strategyName        String
@@ -827,7 +823,6 @@ model ShadowTrade {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  @@index([userId])
   @@index([assetType])
   @@index([ticker])
   @@index([strategyName])
@@ -835,43 +830,393 @@ model ShadowTrade {
   @@index([openedAt])
 }
 
-model ImportedTrade {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider        String   @default("manual")
-  accountLabel    String?
-  assetType       String   @default("stock")
-  ticker          String
-  side            String
-  quantity        Float
-  price           Float
-  fees            Float    @default(0)
-  executedAt      DateTime
-  notes           String?
-  rawJson         String   @default("{}")
-  createdAt       DateTime @default(now())
 
-  @@index([userId])
-  @@index([assetType])
-  @@index([ticker])
-  @@index([executedAt])
+
+// -----------------------------------------------------------------------------
+// TradePilot Professional Core v4
+// Canonical multi-user investment/trading models. Monetary values use Decimal.
+// Legacy paper-trading models above are retained for backwards-compatible UI.
+// -----------------------------------------------------------------------------
+
+
+model AuthChallenge {
+  id          String   @id @default(cuid())
+  email       String
+  purpose     String   @default("LOGIN")
+  codeHash    String
+  attempts    Int      @default(0)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([email, purpose, expiresAt])
 }
 
-model PortfolioSnapshot {
+model AuthSession {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  lastSeenAt   DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model Portfolio {
   id             String   @id @default(cuid())
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider       String   @default("manual")
-  accountLabel   String?
-  currency       String   @default("USD")
-  cash           Float    @default(0)
-  portfolioValue Float    @default(0)
-  positionsJson  String   @default("[]")
-  capturedAt     DateTime @default(now())
+  name           String
+  type           String   @default("INVESTMENT")
+  baseCurrency   String   @default("USD")
+  status         String   @default("ACTIVE")
+  isDefault      Boolean  @default(false)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  @@index([userId])
-  @@index([provider])
-  @@index([capturedAt])
+  brokerAccounts BrokerAccount[]
+  positions      Position[]
+  cashBalances   CashBalance[]
+  orders         Order[]
+  ledgerEntries  LedgerEntry[]
+  performance    PerformanceSnapshot[]
+  riskSnapshots  RiskSnapshot[]
+  deployments    StrategyDeployment[]
+  reconciliationIssues ReconciliationIssue[]
+  leanJobs       LeanJobRecord[]
+
+  @@index([userId, status])
+  @@index([userId, isDefault])
+}
+
+model BrokerAccount {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portfolioId        String?
+  portfolio          Portfolio? @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+  provider           String
+  environment        String   @default("paper")
+  externalAccountId  String
+  accountLabel       String?
+  currency           String?  @default("USD")
+  status             String   @default("DISCONNECTED")
+  authType           String   @default("API_KEY")
+  encryptedCredential String?
+  credentialKeyVersion String?
+  isLive             Boolean  @default(false)
+  liveTradingAllowed Boolean  @default(false)
+  lastSyncAt         DateTime?
+  lastError          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  positions          Position[]
+  orders             Order[]
+  reconciliationIssues ReconciliationIssue[]
+
+  @@unique([userId, provider, environment, externalAccountId])
+  @@index([userId, provider])
+  @@index([portfolioId])
+}
+
+model Position {
+  id              String   @id @default(cuid())
+  portfolioId     String
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  brokerAccountId String
+  brokerAccount   BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  symbol          String
+  assetClass      String   @default("US_EQUITY")
+  quantity        Decimal  @default(0)
+  averageCost     Decimal  @default(0)
+  marketPrice     Decimal  @default(0)
+  marketValue     Decimal  @default(0)
+  unrealizedPnL   Decimal  @default(0)
+  realizedPnL     Decimal  @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@unique([portfolioId, brokerAccountId, symbol])
+  @@index([portfolioId, symbol])
+}
+
+model CashBalance {
+  id            String   @id @default(cuid())
+  portfolioId   String
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  currency      String
+  available     Decimal  @default(0)
+  settled       Decimal  @default(0)
+  reserved      Decimal  @default(0)
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@unique([portfolioId, currency])
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  clientOrderId   String   @unique
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portfolioId     String
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  brokerAccountId String
+  brokerAccount   BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Restrict)
+  brokerOrderId   String?
+  symbol          String
+  assetClass      String   @default("US_EQUITY")
+  side            String
+  type            String
+  timeInForce     String   @default("DAY")
+  quantity        Decimal?
+  notional        Decimal?
+  limitPrice      Decimal?
+  stopPrice       Decimal?
+  averageFillPrice Decimal?
+  filledQuantity  Decimal  @default(0)
+  status          String   @default("CREATED")
+  source          String   @default("MANUAL")
+  riskDecisionJson String  @default("{}")
+  rejectionReason String?
+  submittedAt     DateTime?
+  filledAt        DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  fills           OrderFill[]
+  ledgerEntries   LedgerEntry[]
+
+  @@index([userId, createdAt])
+  @@index([portfolioId, status])
+  @@index([brokerAccountId, brokerOrderId])
+}
+
+model OrderFill {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  brokerFillId  String
+  quantity      Decimal
+  price         Decimal
+  fee           Decimal  @default(0)
+  liquidity     String?
+  executedAt    DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([orderId, brokerFillId])
+  @@index([orderId, executedAt])
+}
+
+model LedgerEntry {
+  id            String   @id @default(cuid())
+  portfolioId   String
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  orderId       String?
+  order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  eventType     String
+  assetSymbol   String?
+  currency      String
+  cashAmount    Decimal  @default(0)
+  assetQuantity Decimal  @default(0)
+  feeAmount     Decimal  @default(0)
+  referenceId   String?
+  metadataJson  String   @default("{}")
+  effectiveAt   DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([portfolioId, effectiveAt])
+  @@index([referenceId])
+}
+
+model PerformanceSnapshot {
+  id            String   @id @default(cuid())
+  portfolioId   String
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  equity        Decimal
+  cash          Decimal
+  investedValue Decimal
+  dailyPnL      Decimal  @default(0)
+  totalPnL      Decimal  @default(0)
+  benchmarkValue Decimal?
+  capturedAt    DateTime @default(now())
+
+  @@index([portfolioId, capturedAt])
+}
+
+model RiskSnapshot {
+  id                  String   @id @default(cuid())
+  portfolioId         String
+  portfolio           Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  grossExposure       Decimal  @default(0)
+  netExposure         Decimal  @default(0)
+  largestPositionPct  Decimal  @default(0)
+  dailyLossPct        Decimal  @default(0)
+  drawdownPct         Decimal  @default(0)
+  openPositions       Int      @default(0)
+  status              String   @default("OK")
+  detailsJson         String   @default("{}")
+  capturedAt          DateTime @default(now())
+
+  @@index([portfolioId, capturedAt])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  action      String
+  resource    String
+  resourceId  String?
+  ipAddress   String?
+  userAgent   String?
+  success     Boolean  @default(true)
+  metadataJson String  @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([resource, resourceId])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope       String
+  key         String
+  requestHash String
+  resourceId  String?
+  responseJson String?
+  statusCode  Int?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, scope, key])
+  @@index([expiresAt])
+}
+
+model Strategy {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  status      String   @default("DRAFT")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  versions    StrategyVersion[]
+
+  @@unique([userId, name])
+}
+
+model StrategyVersion {
+  id             String   @id @default(cuid())
+  strategyId     String
+  strategy       Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  version        Int
+  semanticVersion String?
+  codeHash       String
+  parametersJson String   @default("{}")
+  sourceRef      String?
+  approvalStatus String   @default("DRAFT")
+  createdAt      DateTime @default(now())
+  deployments    StrategyDeployment[]
+  leanJobs       LeanJobRecord[]
+
+  @@unique([strategyId, version])
+}
+
+model StrategyDeployment {
+  id                String   @id @default(cuid())
+  strategyVersionId String
+  strategyVersion   StrategyVersion @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  portfolioId       String
+  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  mode              String   @default("PAPER")
+  status            String   @default("STOPPED")
+  startedAt         DateTime?
+  stoppedAt         DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([portfolioId, status])
+}
+
+model LeanJobRecord {
+  id                String   @id @default(cuid())
+  externalJobId     String?  @unique
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portfolioId       String?
+  portfolio         Portfolio? @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+  strategyVersionId String?
+  strategyVersion   StrategyVersion? @relation(fields: [strategyVersionId], references: [id], onDelete: SetNull)
+  mode              String
+  status            String   @default("QUEUED")
+  requestJson       String
+  resultJson        String?
+  error             String?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([portfolioId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ReconciliationIssue {
+  id              String   @id @default(cuid())
+  portfolioId     String
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  brokerAccountId String
+  brokerAccount   BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  issueType       String
+  severity        String   @default("WARNING")
+  status          String   @default("OPEN")
+  expectedJson    String   @default("{}")
+  actualJson      String   @default("{}")
+  detectedAt      DateTime @default(now())
+  resolvedAt      DateTime?
+
+  @@index([portfolioId, status])
+  @@index([brokerAccountId, detectedAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String
+  title       String
+  body        String
+  severity    String   @default("INFO")
+  readAt      DateTime?
+  metadataJson String  @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model MarketQuoteCache {
+  id          String   @id @default(cuid())
+  symbol      String
+  provider    String
+  bid         Decimal?
+  ask         Decimal?
+  last        Decimal
+  currency    String   @default("USD")
+  sourceTs    DateTime
+  receivedAt  DateTime @default(now())
+
+  @@unique([symbol, provider])
+  @@index([sourceTs])
 }

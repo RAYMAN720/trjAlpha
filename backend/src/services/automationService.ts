@@ -376,8 +376,10 @@ function stopLossStatus(status: string) {
 }
 
 async function recordSkippedExecution(assetType: AssetType, ticker: string, reason: string, rule: string) {
+  const user = await getOrCreateUserSettings();
   await prisma.riskEvent.create({
     data: {
+      userId: user.id,
       assetType,
       ticker,
       rule,
@@ -478,17 +480,17 @@ async function closeIfNeeded(trade: Awaited<ReturnType<typeof prisma.paperTrade.
   return { updated: Boolean(updated), closed: false, reason: "live-price-update" };
 }
 
-async function tickerEntryBlockReason(assetType: AssetType, ticker: string, now = new Date()) {
+async function tickerEntryBlockReason(userId: string, assetType: AssetType, ticker: string, now = new Date()) {
   const sessionStart = getTradingSessionStart(assetType, now);
   const alreadyTradedThisSession = await prisma.paperTrade.findFirst({
-    where: { assetType, ticker, openedAt: { gte: sessionStart } },
+    where: { userId, assetType, ticker, openedAt: { gte: sessionStart } },
     orderBy: { openedAt: "desc" }
   });
   if (alreadyTradedThisSession) return `${ticker} has already been traded in the current session.`;
 
   const cooldownHours = Math.max(1, Number(process.env.STOP_LOSS_REENTRY_COOLDOWN_HOURS ?? 24));
   const recentTrades = await prisma.paperTrade.findMany({
-    where: { assetType, ticker, closedAt: { gte: new Date(now.getTime() - cooldownHours * 60 * 60_000) } },
+    where: { userId, assetType, ticker, closedAt: { gte: new Date(now.getTime() - cooldownHours * 60 * 60_000) } },
     orderBy: { closedAt: "desc" },
     take: 10
   });
@@ -503,7 +505,7 @@ export async function paperTradeUpdateJob() {
     const aiConfig = getAIConfig();
     const user = await getOrCreateUserSettings();
     const shadowRefresh = await refreshShadowTrades().catch(() => ({ checked: 0, updated: 0, closed: 0 }));
-    const openTrades = await prisma.paperTrade.findMany({ where: { status: "Open" } });
+    const openTrades = await prisma.paperTrade.findMany({ where: { userId: user.id, status: "Open" } });
     let updatedCount = 0;
     let closedCount = 0;
     let blockedUpdates = 0;
@@ -537,14 +539,14 @@ export async function paperTradeUpdateJob() {
       for (const signal of candidates) {
         const sessionKey = getTradingSessionKey(assetType);
         const signalKey = `${assetType}:${signal.ticker}:${sessionKey}:${signal.signalType}`;
-        const openCount = await prisma.paperTrade.count({ where: { assetType, status: "Open" } });
+        const openCount = await prisma.paperTrade.count({ where: { userId: user.id, assetType, status: "Open" } });
         if (openCount >= user.maxOpenTrades) break;
 
-        const existingSignalTrade = await prisma.paperTrade.findFirst({ where: { assetType, signalKey } });
+        const existingSignalTrade = await prisma.paperTrade.findFirst({ where: { userId: user.id, assetType, signalKey } });
         if (existingSignalTrade) continue;
-        const existing = await prisma.paperTrade.findFirst({ where: { assetType, ticker: signal.ticker, status: "Open" } });
+        const existing = await prisma.paperTrade.findFirst({ where: { userId: user.id, assetType, ticker: signal.ticker, status: "Open" } });
         if (existing) continue;
-        const entryBlock = await tickerEntryBlockReason(assetType, signal.ticker);
+        const entryBlock = await tickerEntryBlockReason(user.id, assetType, signal.ticker);
         if (entryBlock) {
           blockedEntries += 1;
           await recordSkippedExecution(assetType, signal.ticker, entryBlock, "ticker_reentry_guard");
@@ -649,7 +651,8 @@ export async function paperTradeUpdateJob() {
 
 export async function riskCheckJob() {
   return runJob("riskCheckJob", async () => {
-    const openTrades = await prisma.paperTrade.findMany({ where: { status: "Open" } });
+    const user = await getOrCreateUserSettings();
+    const openTrades = await prisma.paperTrade.findMany({ where: { userId: user.id, status: "Open" } });
     let warnings = 0;
 
     for (const trade of openTrades) {
@@ -770,12 +773,12 @@ export async function startAutomationWorkers() {
 
 export async function getAutomationStatus() {
   await ensureAutomationJobs();
-  const [jobs, latestScan, user, openTrades, alerts, workerLock] = await Promise.all([
+  const user = await getOrCreateUserSettings();
+  const [jobs, latestScan, openTrades, alerts, workerLock] = await Promise.all([
     prisma.scannerJob.findMany({ orderBy: { name: "asc" } }),
     getLatestScan(),
-    getOrCreateUserSettings(),
-    prisma.paperTrade.count({ where: { status: "Open" } }),
-    prisma.alert.count({ where: { active: true } }),
+    prisma.paperTrade.count({ where: { userId: user.id, status: "Open" } }),
+    prisma.alert.count({ where: { userId: user.id, active: true } }),
     prisma.workerLock.findFirst({ orderBy: { heartbeatAt: "desc" } })
   ]);
 

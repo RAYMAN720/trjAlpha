@@ -83,8 +83,8 @@ export async function buildCandidateContext(stock: MockStock, signal?: SignalLik
   const user = await getOrCreateUserSettings();
   const assetType = stock.sector === "Crypto" ? "crypto" : "stock";
   const [openTrades, existingOpenPosition] = await Promise.all([
-    prisma.paperTrade.count({ where: { assetType, status: "Open" } }),
-    prisma.paperTrade.findFirst({ where: { assetType, ticker: stock.ticker, status: "Open" } })
+    prisma.paperTrade.count({ where: { userId: user.id, assetType, status: "Open" } }),
+    prisma.paperTrade.findFirst({ where: { userId: user.id, assetType, ticker: stock.ticker, status: "Open" } })
   ]);
   const score = signal?.score ?? scoreStock(stock);
   const relativeVolume = signal?.relativeVolume ?? relativeVolumeFor(stock);

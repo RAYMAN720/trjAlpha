@@ -9,6 +9,7 @@ import {
   Cpu,
   Lightbulb,
   LineChart,
+  Layers3,
   Menu,
   Newspaper,
   PieChart,
@@ -20,63 +21,65 @@ import {
   Siren,
   Target,
   Trophy,
-  LogOut,
-  UserRound,
   WalletCards,
   X
 } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMarketMode, type MarketMode } from "../lib/marketMode";
-import { api, clearAuthToken } from "../lib/api";
 
 const navGroups = [
   {
-    label: "Stocks",
-    items: [
-      { to: "/stocks", label: "Stock Dashboard", icon: BarChart3 },
-      { to: "/stocks/scanner", label: "Stock Scanner", icon: LineChart },
-      { to: "/stocks/paper-trading", label: "Stock Paper Trading", icon: WalletCards },
-      { to: "/stocks/paper-trading/live", label: "Stock Live Terminal", icon: RadioTower },
-      { to: "/stocks/portfolio", label: "Stock Portfolio", icon: PieChart },
-      { to: "/stocks/news", label: "Stock News", icon: Newspaper },
-      { to: "/stocks/watchlist", label: "Stock Watchlist", icon: Star },
-      { to: "/stocks/learning", label: "Stock Learning", icon: Lightbulb },
-      { to: "/stocks/alerts", label: "Stock Alerts", icon: Siren },
-      { to: "/stocks/reports", label: "Stock Reports", icon: ClipboardList }
-    ]
-  },
-  {
-    label: "Crypto",
-    items: [
-      { to: "/crypto", label: "Crypto Dashboard", icon: Coins },
-      { to: "/crypto/scanner", label: "Crypto Scanner", icon: LineChart },
-      { to: "/crypto/paper-trading", label: "Crypto Paper Trading", icon: WalletCards },
-      { to: "/crypto/paper-trading/live", label: "Crypto Live Terminal", icon: RadioTower },
-      { to: "/crypto/portfolio", label: "Crypto Portfolio", icon: PieChart },
-      { to: "/crypto/news", label: "Crypto News", icon: Newspaper },
-      { to: "/crypto/watchlist", label: "Crypto Watchlist", icon: Star },
-      { to: "/crypto/learning", label: "Crypto Learning", icon: Lightbulb },
-      { to: "/crypto/alerts", label: "Crypto Alerts", icon: Siren },
-      { to: "/crypto/reports", label: "Crypto Reports", icon: ClipboardList }
-    ]
-  },
-  {
-    label: "System",
+    label: "Platform",
     items: [
       { to: "/", label: "Overview", icon: BarChart3 },
-      { to: "/automation", label: "Automation Center", icon: RadioTower },
-      { to: "/professional", label: "Professional Desk", icon: ShieldCheck },
-      { to: "/lean", label: "LEAN Engine", icon: Cpu },
-      { to: "/agents", label: "Agent Activity", icon: Bot },
-      { to: "/playbooks", label: "Strategy Lab", icon: ClipboardCheck },
+      { to: "/platform", label: "Professional Core", icon: Layers3 },
+      { to: "/professional", label: "Trading Desk", icon: ShieldCheck }
+    ]
+  },
+  {
+    label: "Trade",
+    items: [
+      { to: "/stocks/paper-trading/live", label: "Stock Terminal", icon: RadioTower },
+      { to: "/crypto/paper-trading/live", label: "Crypto Terminal", icon: RadioTower },
+      { to: "/broker", label: "Broker Accounts", icon: Building2 },
+      { to: "/lean", label: "Algorithm Engine", icon: Cpu },
+      { to: "/automation", label: "Automation", icon: Bot }
+    ]
+  },
+  {
+    label: "Invest",
+    items: [
+      { to: "/stocks/portfolio", label: "Stock Portfolio", icon: PieChart },
+      { to: "/crypto/portfolio", label: "Crypto Portfolio", icon: WalletCards },
+      { to: "/benchmark", label: "Benchmarks", icon: Trophy }
+    ]
+  },
+  {
+    label: "Research",
+    items: [
+      { to: "/stocks/scanner", label: "Stock Scanner", icon: LineChart },
+      { to: "/crypto/scanner", label: "Crypto Scanner", icon: Coins },
+      { to: "/stocks/news", label: "Market News", icon: Newspaper },
+      { to: "/stocks/watchlist", label: "Watchlist", icon: Star },
+      { to: "/playbooks", label: "Strategy Lab", icon: ClipboardCheck }
+    ]
+  },
+  {
+    label: "Analytics",
+    items: [
       { to: "/strategy", label: "Strategy Performance", icon: Target },
-      { to: "/benchmark", label: "Benchmark", icon: Trophy },
+      { to: "/journal", label: "Trading Journal", icon: BookOpenText },
       { to: "/reports/weekly", label: "Weekly Report", icon: ClipboardList },
-      { to: "/broker", label: "Broker Center", icon: Building2 },
-      { to: "/journal", label: "Journal", icon: BookOpenText },
-      { to: "/profile", label: "Profile", icon: UserRound },
-      { to: "/settings", label: "Settings", icon: Settings }
+      { to: "/stocks/learning", label: "Learning", icon: Lightbulb }
+    ]
+  },
+  {
+    label: "Operations",
+    items: [
+      { to: "/agents", label: "Agent Activity", icon: Bot },
+      { to: "/stocks/alerts", label: "Alerts", icon: Siren },
+      { to: "/settings", label: "Settings & Security", icon: Settings }
     ]
   }
 ];
@@ -127,9 +130,9 @@ function Sidebar({ close }: { close?: () => void }) {
       <div className="mt-auto rounded-lg border border-caution/25 bg-caution/10 p-3 text-sm text-amber-100">
         <div className="flex items-center gap-2 font-semibold">
           <Shield className="h-4 w-4" />
-          Paper Broker Mode
+          Risk-Gated Execution
         </div>
-        <p className="mt-2 text-xs leading-5 text-amber-100/80">Alpaca paper execution enabled. Real-money trading locked off.</p>
+        <p className="mt-2 text-xs leading-5 text-amber-100/80">Paper trading is the default. Live accounts require explicit platform and account-level authorization.</p>
       </div>
     </aside>
   );
@@ -139,7 +142,6 @@ export function Header({ openMenu }: { openMenu: () => void }) {
   const { marketMode, setMarketMode } = useMarketMode();
   const navigate = useNavigate();
   const location = useLocation();
-  const [displayName, setDisplayName] = useState("Trader");
   const modes: Array<{ value: MarketMode; label: string }> = [
     { value: "stocks", label: "Stocks" },
     { value: "crypto", label: "Crypto" }
@@ -162,15 +164,6 @@ export function Header({ openMenu }: { openMenu: () => void }) {
     navigate(equivalentPath(nextMode));
   }
 
-  useEffect(() => {
-    api.session().then((session) => setDisplayName(session.displayName || "Trader")).catch(() => setDisplayName("Trader"));
-  }, []);
-
-  function logout() {
-    clearAuthToken();
-    window.location.assign("/");
-  }
-
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-ink/82 px-4 py-3 backdrop-blur md:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -178,8 +171,8 @@ export function Header({ openMenu }: { openMenu: () => void }) {
           <Menu className="h-5 w-5" />
         </button>
         <div>
-          <h1 className="text-xl font-semibold text-stone-50 md:text-2xl">TradePilot AI Scanner</h1>
-          <p className="text-sm text-stone-400">Research, risk plans, and Alpaca paper trading for {marketMode === "crypto" ? "crypto" : "stocks"}.</p>
+          <h1 className="text-xl font-semibold text-stone-50 md:text-2xl">TradePilot Professional</h1>
+          <p className="text-sm text-stone-400">Multi-user investing, research, risk and trading for {marketMode === "crypto" ? "crypto" : "stocks"}.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex h-10 items-center gap-1 rounded-lg border border-line bg-white/[0.04] p-1">
@@ -198,23 +191,8 @@ export function Header({ openMenu }: { openMenu: () => void }) {
           </div>
           <div className="hidden items-center gap-2 rounded-full border border-mint/25 bg-mint/10 px-3 py-1.5 text-sm font-semibold text-mint sm:flex">
             <Shield className="h-4 w-4" />
-            Paper Trading Only
+            Risk-Gated
           </div>
-          <NavLink
-            className="hidden h-10 items-center gap-2 rounded-lg border border-line bg-white/[0.04] px-3 text-sm font-semibold text-stone-200 hover:border-mint/40 hover:text-mint sm:inline-flex"
-            to="/profile"
-          >
-            <UserRound className="h-4 w-4" />
-            {displayName}
-          </NavLink>
-          <button
-            className="hidden h-10 items-center justify-center rounded-lg border border-line bg-white/[0.04] px-3 text-stone-400 hover:border-danger/40 hover:text-red-100 sm:inline-flex"
-            onClick={logout}
-            title="Log out"
-            type="button"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
         </div>
       </div>
     </header>
@@ -231,7 +209,7 @@ export function AppLayout() {
     { to: `${base}/paper-trading/live`, label: "Live", icon: RadioTower },
     { to: `${base}/portfolio`, label: "Portfolio", icon: PieChart },
     { to: `${base}/news`, label: "News", icon: Newspaper },
-    { to: "/profile", label: "Profile", icon: UserRound }
+    { to: "/settings", label: "Settings", icon: Settings }
   ];
 
   return (
