@@ -1,0 +1,17 @@
+.git
+.DS_Store
+node_modules
+*/node_modules
+dist
+*/dist
+.env
+.env.*
+!.env.example
+backend/prisma/dev.db
+backend/prisma/*.db
+backend/prisma/*.db-journal
+lean-gateway/runtime/*
+!lean-gateway/runtime/data/
+!lean-gateway/runtime/data/README.md
+lean-engine/data/
+*.log

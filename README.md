@@ -5,12 +5,16 @@ TradePilot remains the React/TypeScript product, research, authentication, safet
 ## Architecture
 
 ```text
-React dashboard
+Frontend container (React + Nginx)
+      ↓ /api proxy
+Backend container (Node.js / Express / TypeScript API)
       ↓
-Node.js / Express / TypeScript API
+Worker container (automation jobs)
+      ↓
+Postgres + Redis
       ↓ authenticated HTTP
-TradePilot LEAN Gateway (Node.js, always on)
-      ↓ Docker jobs
+LEAN Gateway container (dry-run by default)
+      ↓ optional Docker jobs
 Official QuantConnect LEAN engine + TradePilotLeanAlgorithm.dll
       ↓
 Historical data for backtests / Alpaca paper brokerage for paper execution
@@ -20,8 +24,11 @@ Historical data for backtests / Alpaca paper brokerage for paper execution
 
 | Component | Responsibility |
 |---|---|
-| React frontend | LEAN jobs, dashboard, research, risk visibility, emergency controls |
+| React frontend | Maintenance page now; dashboard, LEAN jobs, research, risk visibility, emergency controls when re-enabled |
 | TypeScript API | Users, AI/news research, audit records, configuration, gateway adapter |
+| Worker | Scheduled scans, research jobs, paper trade updates, learning and risk checks |
+| Postgres | Persistent application data |
+| Redis | Queue/cache-ready service for worker expansion |
 | LEAN gateway | Authenticated job lifecycle, Docker isolation, paper-only enforcement |
 | LEAN engine | Market events, portfolio accounting, orders, fills, fees, brokerage models, calendars, corporate actions, results |
 | C# algorithm | Trend Breakout V2 signal, sizing, portfolio circuit breakers, protective orders and exits |
@@ -73,15 +80,15 @@ All values can be changed through LEAN job parameters without maintaining separa
 
 ## Requirements
 
-- Node.js 22
-- Docker Engine
+- Node.js 22 for non-Docker local development
+- Docker Engine and Docker Compose
 - A machine that stays online for paper trading
 - PostgreSQL for production TradePilot data
 - Alpaca **paper** API credentials for paper execution
 - QuantConnect user/API/organization credentials and any required local brokerage-module entitlement for the official Alpaca plug-in
 - LEAN-compatible historical US-equity data for local backtests
 
-The LEAN gateway should run directly on the Docker host. This avoids Docker-socket bind-path problems that occur when a container tries to launch sibling containers with host file mounts.
+The Docker Compose stack runs the LEAN gateway in safe dry-run mode by default. If you later enable real LEAN Docker job execution, run that gateway on a secured Docker host and bind the Docker socket intentionally.
 
 ## Installation
 
@@ -121,6 +128,56 @@ lean-gateway/runtime/data/
 The gateway mounts that directory into `/Lean/Data` as read-only. Backtests fail closed when required market, map, factor, or security-master data is missing. Market datasets are not bundled with this project.
 
 ## Start locally
+
+### Docker stack
+
+The preferred local setup mirrors the previous separated-service project:
+
+```bash
+npm run docker:up
+```
+
+Open:
+
+```text
+http://127.0.0.1:8180
+```
+
+Services:
+
+| Service | Port | Notes |
+|---|---:|---|
+| `frontend` | `8180` | Nginx serves the React maintenance page and proxies `/api` to backend |
+| `backend` | `8000` | Express API, Prisma, paper-only safety layer |
+| `worker` | internal | Runs automation jobs separately from the API |
+| `postgres` | internal | Local persistent database |
+| `redis` | internal | Queue/cache-ready service |
+| `lean-gateway` | `8190` | Dry-run LEAN job controller by default |
+
+Useful commands:
+
+```bash
+npm run docker:build
+npm run docker:up:detached
+npm run docker:logs
+npm run docker:down
+```
+
+The Docker stack uses Postgres:
+
+```env
+DATABASE_URL=postgresql://tradepilot:tradepilot@postgres:5432/tradepilot?schema=public
+```
+
+Real-money trading remains disabled in the compose file:
+
+```env
+ALLOW_LIVE_BROKER_TRADING=false
+ALPACA_TRADING_ENV=paper
+AUTO_SUBMIT_BROKER_PAPER_ORDERS=false
+```
+
+### Manual local development
 
 Terminal 1 — backend:
 
