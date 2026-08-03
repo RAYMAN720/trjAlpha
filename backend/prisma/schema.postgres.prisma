@@ -11,6 +11,10 @@ model User {
   id                  String   @id @default(cuid())
   name                String
   email               String   @unique
+  avatarUrl           String?
+  authProvider        String   @default("email")
+  googleSubject       String?
+  lastLoginAt         DateTime?
   demoCapital         Float    @default(500)
   riskPerTradePercent Float    @default(1)
   maxOpenTrades       Int      @default(5)
@@ -21,11 +25,22 @@ model User {
   realTradingEnabled  Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+  tradePlans          TradePlan[]
+  paperTrades         PaperTrade[]
+  brokerConnections   BrokerConnection[]
+  brokerOrders        BrokerOrder[]
+  watchlistItems      WatchlistItem[]
+  journalEntries      JournalEntry[]
+  alerts              Alert[]
+  importedTrades      ImportedTrade[]
+  portfolioSnapshots  PortfolioSnapshot[]
+
+  @@index([googleSubject])
 }
 
 model PaperAccount {
   id                 String           @id @default(cuid())
-  userId             String           @unique
+  userId             String?
   currency           String           @default("EUR")
   startingBalance    Float            @default(500)
   cashBalance        Float            @default(500)
@@ -49,6 +64,7 @@ model PaperAccount {
   tradeEvents        PaperTradeEvent[]
   equitySnapshots    EquitySnapshot[]
 
+  @@index([userId])
   @@index([updatedAt])
 }
 
@@ -207,6 +223,7 @@ model AgentRun {
 
 model ResearchReport {
   id               String   @id @default(cuid())
+  userId           String?
   assetType        String   @default("stock")
   ticker           String
   companyName      String
@@ -242,12 +259,14 @@ model ResearchReport {
   aiMode             String   @default("TECHNICAL_ONLY")
   createdAt        DateTime @default(now())
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
 }
 
 model AIPrediction {
   id               String    @id @default(cuid())
+  userId           String?
   assetType        String    @default("stock")
   ticker           String
   signalType       String
@@ -265,6 +284,7 @@ model AIPrediction {
   researchReportId String?
   createdAt        DateTime  @default(now())
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([signalType])
@@ -274,6 +294,7 @@ model AIPrediction {
 
 model DecisionScore {
   id             String   @id @default(cuid())
+  userId         String?
   assetType      String   @default("stock")
   ticker         String
   signalType     String
@@ -286,6 +307,7 @@ model DecisionScore {
   scoringJson    String
   createdAt      DateTime @default(now())
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([createdAt])
@@ -293,6 +315,8 @@ model DecisionScore {
 
 model TradePlan {
   id              String       @id @default(cuid())
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType       String       @default("stock")
   ticker          String
   entryPrice      Float
@@ -313,6 +337,7 @@ model TradePlan {
   createdAt       DateTime     @default(now())
   paperTrades     PaperTrade[]
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([analysisId])
@@ -321,6 +346,8 @@ model TradePlan {
 
 model PaperTrade {
   id                String    @id @default(cuid())
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType         String    @default("stock")
   ticker            String
   entryPrice        Float
@@ -346,6 +373,7 @@ model PaperTrade {
   tradePlan         TradePlan? @relation(fields: [tradePlanId], references: [id], onDelete: SetNull)
   events            PaperTradeEvent[]
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([status])
@@ -413,6 +441,8 @@ model WorkerLock {
 
 model BrokerConnection {
   id                 String   @id @default(cuid())
+  userId             String?
+  user               User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider           String
   environment        String
   status             String
@@ -428,11 +458,14 @@ model BrokerConnection {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([provider, environment])
+  @@index([userId])
+  @@index([provider, environment])
 }
 
 model BrokerOrder {
   id               String   @id @default(cuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider         String
   environment      String
   brokerOrderId    String?
@@ -457,6 +490,7 @@ model BrokerOrder {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  @@index([userId])
   @@index([ticker])
   @@index([provider, environment])
   @@index([status])
@@ -464,6 +498,7 @@ model BrokerOrder {
 
 model PaperTradeEvent {
   id           String      @id @default(cuid())
+  userId       String?
   assetType    String      @default("stock")
   accountId    String?
   account      PaperAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
@@ -486,6 +521,7 @@ model PaperTradeEvent {
   message      String
   createdAt    DateTime    @default(now())
 
+  @@index([userId])
   @@index([accountId])
   @@index([positionId])
   @@index([ticker])
@@ -535,8 +571,10 @@ model TradeChartMarker {
 
 model WatchlistItem {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType   String   @default("stock")
-  ticker      String   @unique
+  ticker      String
   companyName String
   score       Int
   riskLevel   String
@@ -544,11 +582,15 @@ model WatchlistItem {
   notes       String?
   createdAt   DateTime @default(now())
 
+  @@index([userId])
+  @@index([ticker])
   @@index([assetType])
 }
 
 model JournalEntry {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker      String
   decision    String
   entryReason String
@@ -559,10 +601,14 @@ model JournalEntry {
   aiReview    String?
   result      String
   createdAt   DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Alert {
   id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetType   String   @default("stock")
   ticker      String
   alertType   String
@@ -573,6 +619,7 @@ model Alert {
   readAt      DateTime?
   createdAt   DateTime @default(now())
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([alertType])
@@ -581,6 +628,7 @@ model Alert {
 
 model StrategyPerformance {
   id              String   @id @default(cuid())
+  userId          String?
   scope           String
   scopeValue      String
   tradeCount      Int      @default(0)
@@ -596,11 +644,13 @@ model StrategyPerformance {
   updatedAt       DateTime @updatedAt
   createdAt       DateTime @default(now())
 
-  @@unique([scope, scopeValue])
+  @@index([userId])
+  @@index([scope, scopeValue])
 }
 
 model LearningInsight {
   id         String   @id @default(cuid())
+  userId     String?
   assetType  String   @default("stock")
   title      String
   insight    String
@@ -608,6 +658,7 @@ model LearningInsight {
   category   String
   createdAt  DateTime @default(now())
 
+  @@index([userId])
   @@index([assetType])
   @@index([category])
   @@index([createdAt])
@@ -615,6 +666,7 @@ model LearningInsight {
 
 model RiskEvent {
   id          String   @id @default(cuid())
+  userId      String?
   assetType   String   @default("stock")
   ticker      String?
   rule        String
@@ -624,6 +676,7 @@ model RiskEvent {
   contextJson String
   createdAt   DateTime @default(now())
 
+  @@index([userId])
   @@index([ticker])
   @@index([assetType])
   @@index([rule])
@@ -632,6 +685,7 @@ model RiskEvent {
 
 model BacktestResult {
   id              String   @id @default(cuid())
+  userId          String?
   assetType       String   @default("stock")
   strategyName    String
   startDate       DateTime
@@ -643,6 +697,7 @@ model BacktestResult {
   summary         String
   createdAt       DateTime @default(now())
 
+  @@index([userId])
   @@index([strategyName])
   @@index([assetType])
 }
@@ -678,6 +733,7 @@ model MarketRegimeSnapshot {
 
 model ProfessionalDecisionRecord {
   id                     String   @id @default(cuid())
+  userId                 String?
   assetType              String   @default("stock")
   ticker                 String
   strategyName           String
@@ -701,6 +757,7 @@ model ProfessionalDecisionRecord {
   contextJson            String
   createdAt              DateTime @default(now())
 
+  @@index([userId])
   @@index([assetType])
   @@index([ticker])
   @@index([decision])
@@ -711,6 +768,7 @@ model ProfessionalDecisionRecord {
 
 model ExecutionSimulation {
   id                 String   @id @default(cuid())
+  userId             String?
   paperTradeId       String?
   assetType          String   @default("stock")
   ticker             String
@@ -734,6 +792,7 @@ model ExecutionSimulation {
   warningsJson       String
   createdAt          DateTime @default(now())
 
+  @@index([userId])
   @@index([paperTradeId])
   @@index([assetType])
   @@index([ticker])
@@ -743,6 +802,7 @@ model ExecutionSimulation {
 
 model ShadowTrade {
   id                  String    @id @default(cuid())
+  userId              String?
   assetType           String    @default("stock")
   ticker              String
   strategyName        String
@@ -767,6 +827,7 @@ model ShadowTrade {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  @@index([userId])
   @@index([assetType])
   @@index([ticker])
   @@index([strategyName])
@@ -774,3 +835,43 @@ model ShadowTrade {
   @@index([openedAt])
 }
 
+model ImportedTrade {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String   @default("manual")
+  accountLabel    String?
+  assetType       String   @default("stock")
+  ticker          String
+  side            String
+  quantity        Float
+  price           Float
+  fees            Float    @default(0)
+  executedAt      DateTime
+  notes           String?
+  rawJson         String   @default("{}")
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([assetType])
+  @@index([ticker])
+  @@index([executedAt])
+}
+
+model PortfolioSnapshot {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String   @default("manual")
+  accountLabel   String?
+  currency       String   @default("USD")
+  cash           Float    @default(0)
+  portfolioValue Float    @default(0)
+  positionsJson  String   @default("[]")
+  capturedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([provider])
+  @@index([capturedAt])
+}

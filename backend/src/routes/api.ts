@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request } from "express";
 import type { AIAnalysis } from "@prisma/client";
 import { prisma } from "../utils/prisma.js";
 import {
@@ -15,6 +16,8 @@ import { getAssetLogo, getAssetProfile } from "../services/assets/logoService.js
 import {
   AuthCodeError,
   createAccessToken,
+  loginWithGoogleCredential,
+  registerAndRequestLoginCode,
   requestLoginCode,
   requireAppAuth,
   verifyAccessToken,
@@ -46,7 +49,7 @@ import {
   generateTradePlan,
   refreshPaperTradeFromMarket
 } from "../services/tradePlanService.js";
-import { getOrCreateUserSettings } from "../services/userSettingsService.js";
+import { getOrCreateUserSettings, getUserProfile, updateUserProfile } from "../services/userSettingsService.js";
 import { generateDocumentedInvestmentReport } from "../services/reportService.js";
 import { generateWeeklyTraderReport } from "../services/reports/weeklyTraderReport.js";
 import { getCurrentProfessionalMarketRegime, getRecentMarketRegimes } from "../services/professional/marketRegimeService.js";
@@ -75,6 +78,17 @@ function assetTypeFromMarketInput(value?: unknown): AssetType {
 
 function assetTypeWhere(assetType?: AssetType) {
   return assetType ? { assetType } : undefined;
+}
+
+function currentUserId(req: Request) {
+  return req.appUser?.sub;
+}
+
+function userScopedWhere(req: Request, assetType?: AssetType) {
+  return {
+    ...(assetType ? { assetType } : {}),
+    userId: currentUserId(req)
+  };
 }
 
 function compactAnalysis(analysis?: AIAnalysis | null) {
@@ -116,17 +130,17 @@ async function enrichSignalsWithAnalyses<T extends { id: string; ticker: string 
   }));
 }
 
-async function getAssetDashboard(market: MarketMode) {
+async function getAssetDashboard(market: MarketMode, userId?: string | null) {
   const assetType = assetTypeForMarket(market);
   const [settings, scan, trades, jobs, paperAccount] = await Promise.all([
-    getOrCreateUserSettings(),
+    getOrCreateUserSettings(userId),
     getLatestScan(market),
     prisma.paperTrade.findMany({
-      where: { assetType },
+      where: { assetType, userId },
       orderBy: { openedAt: "desc" }
     }),
     prisma.scannerJob.findMany({ orderBy: { name: "asc" } }),
-    getPaperAccountSummary(assetType)
+    getPaperAccountSummary(assetType, userId)
   ]);
   const openTrades = trades.filter((trade) => trade.status === "Open");
   const todayProfit = openTrades.reduce((total, trade) => total + trade.profitLoss, 0);
@@ -183,7 +197,7 @@ async function getAssetDetailPayload(symbol: string, market: MarketMode) {
   return stock ? { ...stock, assetType, signal } : null;
 }
 
-async function createTradePlanForAsset(symbol: string, market: MarketMode) {
+async function createTradePlanForAsset(symbol: string, market: MarketMode, userId?: string | null) {
   const ticker = symbol.toUpperCase();
   const assetType = assetTypeForMarket(market);
   const stock = await marketDataProvider.getStock(ticker, market);
@@ -199,6 +213,7 @@ async function createTradePlanForAsset(symbol: string, market: MarketMode) {
   });
 
   return generateTradePlan({
+    userId,
     assetType,
     ticker,
     currentPrice: stock.price,
@@ -208,8 +223,8 @@ async function createTradePlanForAsset(symbol: string, market: MarketMode) {
   });
 }
 
-async function listPaperTrades(assetType?: AssetType) {
-  const trades = await prisma.paperTrade.findMany({ where: assetTypeWhere(assetType), orderBy: { openedAt: "desc" } });
+async function listPaperTrades(assetType?: AssetType, userId?: string | null) {
+  const trades = await prisma.paperTrade.findMany({ where: { ...(assetTypeWhere(assetType) ?? {}), userId }, orderBy: { openedAt: "desc" } });
   const tradeIds = trades.map((trade) => trade.id);
   const tickers = [...new Set(trades.map((trade) => trade.ticker))];
   const analyses = tradeIds.length || tickers.length
@@ -261,7 +276,7 @@ apiRouter.post("/auth/login", (req, res, next) => {
 
 apiRouter.post("/auth/code/request", async (_req, res, next) => {
   try {
-    return res.json(await requestLoginCode());
+    return res.json(await requestLoginCode(_req.body?.email));
   } catch (error) {
     if (error instanceof AuthCodeError) {
       return res.status(error.status).json({ error: error.message });
@@ -270,10 +285,24 @@ apiRouter.post("/auth/code/request", async (_req, res, next) => {
   }
 });
 
-apiRouter.post("/auth/code/verify", (req, res, next) => {
+apiRouter.post("/auth/register", async (req, res, next) => {
+  try {
+    return res.json(await registerAndRequestLoginCode({ name: req.body?.name, email: req.body?.email }));
+  } catch (error) {
+    if (error instanceof AuthCodeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    if (error instanceof Error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+apiRouter.post("/auth/code/verify", async (req, res, next) => {
   try {
     const code = String(req.body.code ?? "");
-    return res.json(verifyLoginCode(code));
+    return res.json(await verifyLoginCode(code, req.body.email));
   } catch (error) {
     if (error instanceof AuthCodeError) {
       return res.status(error.status).json({ error: error.message });
@@ -282,7 +311,18 @@ apiRouter.post("/auth/code/verify", (req, res, next) => {
   }
 });
 
-apiRouter.get("/auth/session", (req, res) => {
+apiRouter.post("/auth/google", async (req, res, next) => {
+  try {
+    return res.json(await loginWithGoogleCredential(req.body?.credential));
+  } catch (error) {
+    if (error instanceof AuthCodeError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
+
+apiRouter.get("/auth/session", async (req, res) => {
   const authHeader = req.get("authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : null;
   const payload = verifyAccessToken(token);
@@ -291,14 +331,34 @@ apiRouter.get("/auth/session", (req, res) => {
     return res.status(401).json({ error: "Session expired." });
   }
 
+  const profile = await getUserProfile(payload.sub).catch(() => null);
+
   return res.json({
     ok: true,
-    displayName: payload.name,
+    userId: payload.sub,
+    email: profile?.email ?? payload.email,
+    displayName: profile?.name ?? payload.name,
     expiresAt: new Date(payload.exp * 1000).toISOString()
   });
 });
 
 apiRouter.use(requireAppAuth);
+
+apiRouter.get("/profile", async (req, res, next) => {
+  try {
+    res.json(await getUserProfile(currentUserId(req) ?? ""));
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.put("/profile", async (req, res, next) => {
+  try {
+    res.json(await updateUserProfile(currentUserId(req) ?? "", req.body ?? {}));
+  } catch (error) {
+    next(error);
+  }
+});
 
 apiRouter.get("/system/status", async (_req, res, next) => {
   try {
@@ -582,32 +642,32 @@ apiRouter.get("/playbooks/status", async (req, res, next) => {
 apiRouter.get("/paper-account", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await getPaperAccountSummary(assetType));
+    res.json(await getPaperAccountSummary(assetType, currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/paper-account/equity", async (_req, res, next) => {
+apiRouter.get("/paper-account/equity", async (req, res, next) => {
   try {
-    res.json(await getPaperAccountEquity());
+    res.json(await getPaperAccountEquity(currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/paper-account/snapshots", async (_req, res, next) => {
+apiRouter.get("/paper-account/snapshots", async (req, res, next) => {
   try {
-    const summary = await getPaperAccountEquity();
+    const summary = await getPaperAccountEquity(currentUserId(req));
     res.json(summary.snapshots);
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.post("/paper-account/reset", async (_req, res, next) => {
+apiRouter.post("/paper-account/reset", async (req, res, next) => {
   try {
-    res.json(await resetPaperAccount());
+    res.json(await resetPaperAccount(currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -616,7 +676,7 @@ apiRouter.post("/paper-account/reset", async (_req, res, next) => {
 apiRouter.get("/paper-trades/open", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json((await listPaperTrades(assetType)).filter((trade) => trade.status === "Open"));
+    res.json((await listPaperTrades(assetType, currentUserId(req))).filter((trade) => trade.status === "Open"));
   } catch (error) {
     next(error);
   }
@@ -624,7 +684,7 @@ apiRouter.get("/paper-trades/open", async (req, res, next) => {
 
 apiRouter.post("/paper-trades/open", async (req, res, next) => {
   try {
-    res.json(await approveDemoTrade(String(req.body.tradePlanId)));
+    res.json(await approveDemoTrade(String(req.body.tradePlanId), currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -633,7 +693,7 @@ apiRouter.post("/paper-trades/open", async (req, res, next) => {
 apiRouter.get("/paper-trades/closed", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json((await listPaperTrades(assetType)).filter((trade) => trade.status !== "Open"));
+    res.json((await listPaperTrades(assetType, currentUserId(req))).filter((trade) => trade.status !== "Open"));
   } catch (error) {
     next(error);
   }
@@ -641,7 +701,7 @@ apiRouter.get("/paper-trades/closed", async (req, res, next) => {
 
 apiRouter.get("/paper-trades/:id/events", async (req, res, next) => {
   try {
-    res.json(await prisma.paperTradeEvent.findMany({ where: { paperTradeId: req.params.id }, orderBy: { createdAt: "asc" } }));
+    res.json(await prisma.paperTradeEvent.findMany({ where: { paperTradeId: req.params.id, userId: currentUserId(req) }, orderBy: { createdAt: "asc" } }));
   } catch (error) {
     next(error);
   }
@@ -649,7 +709,7 @@ apiRouter.get("/paper-trades/:id/events", async (req, res, next) => {
 
 apiRouter.post("/paper-trades/:id/close", async (req, res, next) => {
   try {
-    res.json(await closePaperTradeAtMarket(req.params.id, req.body.status ?? "manual_close"));
+    res.json(await closePaperTradeAtMarket(req.params.id, req.body.status ?? "manual_close", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -738,15 +798,15 @@ apiRouter.get("/assets/:assetType/:symbol/profile", async (req, res, next) => {
 apiRouter.get("/activity-feed", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await prisma.paperTradeEvent.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" }, take: 80 }));
+    res.json(await prisma.paperTradeEvent.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" }, take: 80 }));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/settings", async (_req, res, next) => {
+apiRouter.get("/settings", async (req, res, next) => {
   try {
-    res.json(await getOrCreateUserSettings());
+    res.json(await getOrCreateUserSettings(currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -754,7 +814,7 @@ apiRouter.get("/settings", async (_req, res, next) => {
 
 apiRouter.put("/settings", async (req, res, next) => {
   try {
-    const user = await getOrCreateUserSettings();
+    const user = await getOrCreateUserSettings(currentUserId(req));
     const numberOrCurrent = (value: unknown, current: number) => {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : current;
@@ -803,17 +863,17 @@ apiRouter.get("/scanner/signals", async (req, res, next) => {
   }
 });
 
-apiRouter.get("/stocks/dashboard", async (_req, res, next) => {
+apiRouter.get("/stocks/dashboard", async (req, res, next) => {
   try {
-    res.json(await getAssetDashboard("stocks"));
+    res.json(await getAssetDashboard("stocks", currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/crypto/dashboard", async (_req, res, next) => {
+apiRouter.get("/crypto/dashboard", async (req, res, next) => {
   try {
-    res.json(await getAssetDashboard("crypto"));
+    res.json(await getAssetDashboard("crypto", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -873,7 +933,7 @@ apiRouter.get("/crypto/signals", async (_req, res, next) => {
 
 apiRouter.post("/stocks/trade-plans", async (req, res, next) => {
   try {
-    const plan = await createTradePlanForAsset(String(req.body.ticker), "stocks");
+    const plan = await createTradePlanForAsset(String(req.body.ticker), "stocks", currentUserId(req));
     if (!plan) return res.status(404).json({ error: "Asset not found" });
     return res.json(plan);
   } catch (error) {
@@ -883,7 +943,7 @@ apiRouter.post("/stocks/trade-plans", async (req, res, next) => {
 
 apiRouter.post("/crypto/trade-plans", async (req, res, next) => {
   try {
-    const plan = await createTradePlanForAsset(String(req.body.symbol ?? req.body.ticker), "crypto");
+    const plan = await createTradePlanForAsset(String(req.body.symbol ?? req.body.ticker), "crypto", currentUserId(req));
     if (!plan) return res.status(404).json({ error: "Asset not found" });
     return res.json(plan);
   } catch (error) {
@@ -891,17 +951,17 @@ apiRouter.post("/crypto/trade-plans", async (req, res, next) => {
   }
 });
 
-apiRouter.get("/stocks/paper-trades", async (_req, res, next) => {
+apiRouter.get("/stocks/paper-trades", async (req, res, next) => {
   try {
-    res.json(await listPaperTrades("stock"));
+    res.json(await listPaperTrades("stock", currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/crypto/paper-trades", async (_req, res, next) => {
+apiRouter.get("/crypto/paper-trades", async (req, res, next) => {
   try {
-    res.json(await listPaperTrades("crypto"));
+    res.json(await listPaperTrades("crypto", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -909,7 +969,7 @@ apiRouter.get("/crypto/paper-trades", async (_req, res, next) => {
 
 apiRouter.post("/stocks/paper-trades", async (req, res, next) => {
   try {
-    res.json(await approveDemoTrade(String(req.body.tradePlanId)));
+    res.json(await approveDemoTrade(String(req.body.tradePlanId), currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -917,7 +977,7 @@ apiRouter.post("/stocks/paper-trades", async (req, res, next) => {
 
 apiRouter.post("/crypto/paper-trades", async (req, res, next) => {
   try {
-    res.json(await approveDemoTrade(String(req.body.tradePlanId)));
+    res.json(await approveDemoTrade(String(req.body.tradePlanId), currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -958,7 +1018,7 @@ apiRouter.get("/crypto/:symbol/chart", async (req, res, next) => {
   }
 });
 
-async function createResearchForTicker(ticker: string, market = normalizeMarketMode()) {
+async function createResearchForTicker(ticker: string, market = normalizeMarketMode(), userId?: string | null) {
   const assetType = assetTypeForMarket(market);
   const stock = await marketDataProvider.getStock(ticker, market);
   if (!stock) throw new Error("Asset not found.");
@@ -971,6 +1031,7 @@ async function createResearchForTicker(ticker: string, market = normalizeMarketM
 
   return prisma.researchReport.create({
     data: {
+      userId,
       assetType,
       ticker: report.ticker.toUpperCase(),
       companyName: report.companyName,
@@ -1010,7 +1071,7 @@ async function createResearchForTicker(ticker: string, market = normalizeMarketM
 
 apiRouter.post("/stocks/:ticker/research", async (req, res, next) => {
   try {
-    res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), "stocks"));
+    res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), "stocks", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1018,7 +1079,7 @@ apiRouter.post("/stocks/:ticker/research", async (req, res, next) => {
 
 apiRouter.post("/crypto/:symbol/research", async (req, res, next) => {
   try {
-    res.json(await createResearchForTicker(req.params.symbol.toUpperCase(), "crypto"));
+    res.json(await createResearchForTicker(req.params.symbol.toUpperCase(), "crypto", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1029,11 +1090,11 @@ apiRouter.get("/research/:ticker", async (req, res, next) => {
     const market = normalizeMarketMode(req.query.market);
     const assetType = assetTypeForMarket(market);
     const report = await prisma.researchReport.findFirst({
-      where: { ticker: req.params.ticker.toUpperCase(), assetType },
+      where: { ticker: req.params.ticker.toUpperCase(), assetType, userId: currentUserId(req) },
       orderBy: { createdAt: "desc" }
     });
 
-    if (!report) return res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), market));
+    if (!report) return res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), market, currentUserId(req)));
     res.json(report);
   } catch (error) {
     next(error);
@@ -1042,7 +1103,7 @@ apiRouter.get("/research/:ticker", async (req, res, next) => {
 
 apiRouter.post("/research/:ticker/generate", async (req, res, next) => {
   try {
-    res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), normalizeMarketMode(req.query.market ?? req.body?.market)));
+    res.json(await createResearchForTicker(req.params.ticker.toUpperCase(), normalizeMarketMode(req.query.market ?? req.body?.market), currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1085,7 +1146,7 @@ apiRouter.get("/timeframes/:ticker", async (req, res, next) => {
 
 apiRouter.post("/trade-plans", async (req, res, next) => {
   try {
-    const plan = await createTradePlanForAsset(String(req.body.ticker), normalizeMarketMode(req.body.market));
+    const plan = await createTradePlanForAsset(String(req.body.ticker), normalizeMarketMode(req.body.market), currentUserId(req));
     if (!plan) return res.status(404).json({ error: "Asset not found" });
     return res.json(plan);
   } catch (error) {
@@ -1098,7 +1159,7 @@ apiRouter.get("/trade-plans/:ticker", async (req, res, next) => {
     const market = req.query.market ? normalizeMarketMode(req.query.market) : null;
     const assetType = market ? assetTypeForMarket(market) : undefined;
     const plans = await prisma.tradePlan.findMany({
-      where: { ticker: req.params.ticker.toUpperCase(), ...(assetType ? { assetType } : {}) },
+      where: { userId: currentUserId(req), ticker: req.params.ticker.toUpperCase(), ...(assetType ? { assetType } : {}) },
       orderBy: { createdAt: "desc" }
     });
     res.json(plans);
@@ -1110,7 +1171,7 @@ apiRouter.get("/trade-plans/:ticker", async (req, res, next) => {
 apiRouter.get("/trade-plans", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await prisma.tradePlan.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" } }));
+    res.json(await prisma.tradePlan.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" } }));
   } catch (error) {
     next(error);
   }
@@ -1118,7 +1179,7 @@ apiRouter.get("/trade-plans", async (req, res, next) => {
 
 apiRouter.post("/paper-trades", async (req, res, next) => {
   try {
-    res.json(await approveDemoTrade(String(req.body.tradePlanId)));
+    res.json(await approveDemoTrade(String(req.body.tradePlanId), currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1127,7 +1188,7 @@ apiRouter.post("/paper-trades", async (req, res, next) => {
 apiRouter.get("/paper-trades", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await listPaperTrades(assetType));
+    res.json(await listPaperTrades(assetType, currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1135,7 +1196,7 @@ apiRouter.get("/paper-trades", async (req, res, next) => {
 
 apiRouter.put("/paper-trades/:id/close", async (req, res, next) => {
   try {
-    res.json(await closePaperTradeAtMarket(req.params.id, req.body.status ?? "manual_close"));
+    res.json(await closePaperTradeAtMarket(req.params.id, req.body.status ?? "manual_close", currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1143,7 +1204,7 @@ apiRouter.put("/paper-trades/:id/close", async (req, res, next) => {
 
 apiRouter.put("/paper-trades/:id/update-price", async (req, res, next) => {
   try {
-    res.json(await refreshPaperTradeFromMarket(req.params.id));
+    res.json(await refreshPaperTradeFromMarket(req.params.id, currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1152,7 +1213,7 @@ apiRouter.put("/paper-trades/:id/update-price", async (req, res, next) => {
 apiRouter.get("/watchlist", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await prisma.watchlistItem.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" } }));
+    res.json(await prisma.watchlistItem.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" } }));
   } catch (error) {
     next(error);
   }
@@ -1171,26 +1232,37 @@ apiRouter.post("/watchlist", async (req, res, next) => {
       orderBy: { createdAt: "desc" }
     });
 
-    const item = await prisma.watchlistItem.upsert({
-      where: { ticker },
-      update: {
-        assetType,
-        companyName: stock.companyName,
-        score: Number(req.body.score ?? signal?.score ?? 50),
-        riskLevel: String(req.body.riskLevel ?? signal?.riskLevel ?? "Medium"),
-        decision: String(req.body.decision ?? signal?.decision ?? "Research More"),
-        notes: req.body.notes
-      },
-      create: {
-        assetType,
-        ticker,
-        companyName: stock.companyName,
-        score: Number(req.body.score ?? signal?.score ?? 50),
-        riskLevel: String(req.body.riskLevel ?? signal?.riskLevel ?? "Medium"),
-        decision: String(req.body.decision ?? signal?.decision ?? "Research More"),
-        notes: req.body.notes
-      }
+    const ownerUserId = currentUserId(req);
+    const existing = await prisma.watchlistItem.findFirst({
+      where: { userId: ownerUserId, assetType, ticker }
     });
+    const itemData = {
+      assetType,
+      ticker,
+      companyName: stock.companyName,
+      score: Number(req.body.score ?? signal?.score ?? 50),
+      riskLevel: String(req.body.riskLevel ?? signal?.riskLevel ?? "Medium"),
+      decision: String(req.body.decision ?? signal?.decision ?? "Research More"),
+      notes: req.body.notes
+    };
+    const item = existing
+      ? await prisma.watchlistItem.update({
+          where: { id: existing.id },
+          data: {
+            assetType: itemData.assetType,
+            companyName: itemData.companyName,
+            score: itemData.score,
+            riskLevel: itemData.riskLevel,
+            decision: itemData.decision,
+            notes: itemData.notes
+          }
+        })
+      : await prisma.watchlistItem.create({
+          data: {
+            userId: ownerUserId,
+            ...itemData
+          }
+        });
 
     res.json(item);
   } catch (error) {
@@ -1203,9 +1275,9 @@ apiRouter.delete("/watchlist/:ticker", async (req, res, next) => {
     const ticker = req.params.ticker.toUpperCase();
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
     if (assetType) {
-      await prisma.watchlistItem.deleteMany({ where: { ticker, assetType } });
+      await prisma.watchlistItem.deleteMany({ where: { ticker, assetType, userId: currentUserId(req) } });
     } else {
-      await prisma.watchlistItem.delete({ where: { ticker } });
+      await prisma.watchlistItem.deleteMany({ where: { ticker, userId: currentUserId(req) } });
     }
     res.status(204).send();
   } catch (error) {
@@ -1213,9 +1285,9 @@ apiRouter.delete("/watchlist/:ticker", async (req, res, next) => {
   }
 });
 
-apiRouter.get("/journal", async (_req, res, next) => {
+apiRouter.get("/journal", async (req, res, next) => {
   try {
-    res.json(await prisma.journalEntry.findMany({ orderBy: { createdAt: "desc" } }));
+    res.json(await prisma.journalEntry.findMany({ where: { userId: currentUserId(req) }, orderBy: { createdAt: "desc" } }));
   } catch (error) {
     next(error);
   }
@@ -1225,6 +1297,7 @@ apiRouter.post("/journal", async (req, res, next) => {
   try {
     const entry = await prisma.journalEntry.create({
       data: {
+        userId: currentUserId(req),
         ticker: String(req.body.ticker).toUpperCase(),
         decision: String(req.body.decision),
         entryReason: String(req.body.entryReason),
@@ -1244,7 +1317,7 @@ apiRouter.post("/journal", async (req, res, next) => {
 
 apiRouter.post("/journal/:id/ai-review", async (req, res, next) => {
   try {
-    const entry = await prisma.journalEntry.findUnique({ where: { id: req.params.id } });
+    const entry = await prisma.journalEntry.findFirst({ where: { id: req.params.id, userId: currentUserId(req) } });
     if (!entry) return res.status(404).json({ error: "Journal entry not found" });
 
     const aiReview = generateJournalReview(entry);
@@ -1257,7 +1330,7 @@ apiRouter.post("/journal/:id/ai-review", async (req, res, next) => {
 apiRouter.get("/alerts", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await prisma.alert.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" } }));
+    res.json(await prisma.alert.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" } }));
   } catch (error) {
     next(error);
   }
@@ -1266,6 +1339,7 @@ apiRouter.get("/alerts", async (req, res, next) => {
 apiRouter.post("/alerts", async (req, res, next) => {
   try {
     const alert = await createAlert({
+      userId: currentUserId(req),
       assetType: assetTypeForMarket(normalizeMarketMode(req.body.market)),
       ticker: String(req.body.ticker ?? "SYSTEM").toUpperCase(),
       alertType: String(req.body.alertType ?? "Price"),
@@ -1281,7 +1355,7 @@ apiRouter.post("/alerts", async (req, res, next) => {
 
 apiRouter.delete("/alerts/:id", async (req, res, next) => {
   try {
-    await prisma.alert.delete({ where: { id: req.params.id } });
+    await prisma.alert.deleteMany({ where: { id: req.params.id, userId: currentUserId(req) } });
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -1290,6 +1364,8 @@ apiRouter.delete("/alerts/:id", async (req, res, next) => {
 
 apiRouter.put("/alerts/:id/read", async (req, res, next) => {
   try {
+    const alert = await prisma.alert.findFirst({ where: { id: req.params.id, userId: currentUserId(req) } });
+    if (!alert) return res.status(404).json({ error: "Alert not found" });
     res.json(await markAlertRead(req.params.id));
   } catch (error) {
     next(error);
@@ -1341,18 +1417,9 @@ apiRouter.post("/automation/jobs/:name/run", async (req, res, next) => {
 
 apiRouter.put("/automation/auto-paper-trading", async (req, res, next) => {
   try {
-    const user = await prisma.user.findFirst();
+    const user = await getOrCreateUserSettings(currentUserId(req));
     const autoPaperTrading = Boolean(req.body.autoPaperTrading);
-    const saved = user
-      ? await prisma.user.update({ where: { id: user.id }, data: { autoPaperTrading, realTradingEnabled: false } })
-      : await prisma.user.create({
-          data: {
-            name: "Demo User",
-            email: "demo@tradepilot.local",
-            autoPaperTrading,
-            realTradingEnabled: false
-          }
-        });
+    const saved = await prisma.user.update({ where: { id: user.id }, data: { autoPaperTrading, realTradingEnabled: false } });
     res.json(saved);
   } catch (error) {
     next(error);
@@ -1380,7 +1447,7 @@ apiRouter.get("/agents/runs", async (req, res, next) => {
 apiRouter.get("/learning/summary", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await getLearningSummary(assetType));
+    res.json(await getLearningSummary(assetType, currentUserId(req)));
   } catch (error) {
     next(error);
   }
@@ -1391,8 +1458,8 @@ apiRouter.get("/strategy/performance", async (req, res, next) => {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
     const [performance, events, riskEvents, backtests] = await Promise.all([
       prisma.strategyPerformance.findMany({ orderBy: { updatedAt: "desc" } }),
-      prisma.paperTradeEvent.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" }, take: 50 }),
-      prisma.riskEvent.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" }, take: 50 }),
+      prisma.paperTradeEvent.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" }, take: 50 }),
+      prisma.riskEvent.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" }, take: 50 }),
       prisma.backtestResult.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" }, take: 10 })
     ]);
     const filteredPerformance = assetType
@@ -1407,31 +1474,115 @@ apiRouter.get("/strategy/performance", async (req, res, next) => {
 apiRouter.get("/predictions", async (req, res, next) => {
   try {
     const assetType = req.query.market ? assetTypeFromMarketInput(req.query.market) : undefined;
-    res.json(await prisma.aIPrediction.findMany({ where: assetTypeWhere(assetType), orderBy: { createdAt: "desc" }, take: 100 }));
+    res.json(await prisma.aIPrediction.findMany({ where: userScopedWhere(req, assetType), orderBy: { createdAt: "desc" }, take: 100 }));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/broker/status", async (_req, res, next) => {
+apiRouter.get("/broker/status", async (req, res, next) => {
   try {
-    res.json(await getBrokerStatus());
+    res.json(await getBrokerStatus(currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.post("/broker/sync", async (_req, res, next) => {
+apiRouter.post("/broker/sync", async (req, res, next) => {
   try {
-    res.json(await syncBrokerAccount());
+    res.json(await syncBrokerAccount(currentUserId(req)));
   } catch (error) {
     next(error);
   }
 });
 
-apiRouter.get("/broker/orders", async (_req, res, next) => {
+apiRouter.get("/broker/orders", async (req, res, next) => {
   try {
-    res.json(await getBrokerOrders());
+    res.json(await getBrokerOrders(currentUserId(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.get("/portfolio/imported-trades", async (req, res, next) => {
+  try {
+    res.json(
+      await prisma.importedTrade.findMany({
+        where: { userId: currentUserId(req) ?? "" },
+        orderBy: { executedAt: "desc" },
+        take: 500
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.post("/portfolio/imported-trades", async (req, res, next) => {
+  try {
+    const rows = Array.isArray(req.body.trades) ? req.body.trades : [req.body];
+    const userId = currentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized." });
+
+    const trades = await prisma.$transaction(
+      rows.slice(0, 250).map((row: Record<string, unknown>) =>
+        prisma.importedTrade.create({
+          data: {
+            userId,
+            provider: String(row.provider ?? "manual"),
+            accountLabel: row.accountLabel ? String(row.accountLabel) : undefined,
+            assetType: String(row.assetType ?? "stock").toLowerCase() === "crypto" ? "crypto" : "stock",
+            ticker: String(row.ticker ?? row.symbol ?? "").toUpperCase(),
+            side: String(row.side ?? "buy").toLowerCase() === "sell" ? "sell" : "buy",
+            quantity: Number(row.quantity ?? 0),
+            price: Number(row.price ?? 0),
+            fees: Number(row.fees ?? 0),
+            executedAt: row.executedAt ? new Date(String(row.executedAt)) : new Date(),
+            notes: row.notes ? String(row.notes) : undefined,
+            rawJson: JSON.stringify(row)
+          }
+        })
+      )
+    );
+
+    res.json({ imported: trades.length, trades });
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.get("/portfolio/snapshots", async (req, res, next) => {
+  try {
+    res.json(
+      await prisma.portfolioSnapshot.findMany({
+        where: { userId: currentUserId(req) ?? "" },
+        orderBy: { capturedAt: "desc" },
+        take: 120
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+apiRouter.post("/portfolio/snapshots", async (req, res, next) => {
+  try {
+    const userId = currentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized." });
+
+    res.json(
+      await prisma.portfolioSnapshot.create({
+        data: {
+          userId,
+          provider: String(req.body.provider ?? "manual"),
+          accountLabel: req.body.accountLabel ? String(req.body.accountLabel) : undefined,
+          currency: String(req.body.currency ?? "USD").toUpperCase(),
+          cash: Number(req.body.cash ?? 0),
+          portfolioValue: Number(req.body.portfolioValue ?? 0),
+          positionsJson: JSON.stringify(Array.isArray(req.body.positions) ? req.body.positions : [])
+        }
+      })
+    );
   } catch (error) {
     next(error);
   }
@@ -1439,7 +1590,7 @@ apiRouter.get("/broker/orders", async (_req, res, next) => {
 
 apiRouter.post("/broker/orders/from-trade-plan", async (req, res, next) => {
   try {
-    res.json(await submitBrokerOrderFromTradePlan(String(req.body.tradePlanId)));
+    res.json(await submitBrokerOrderFromTradePlan(String(req.body.tradePlanId), currentUserId(req)));
   } catch (error) {
     next(error);
   }

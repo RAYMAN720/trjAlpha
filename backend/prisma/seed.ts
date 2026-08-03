@@ -9,7 +9,7 @@ import { generateTradePlan } from "../src/services/tradePlanService.js";
 const prisma = new PrismaClient();
 
 async function main() {
-  await prisma.user.upsert({
+  const user = await prisma.user.upsert({
     where: { email: "demo@tradepilot.local" },
     update: {
       demoCapital: 500,
@@ -74,6 +74,7 @@ async function main() {
     const report = await generateResearchReport(stock, signal);
     await prisma.researchReport.create({
       data: {
+        userId: user.id,
         ticker: report.ticker,
         companyName: report.companyName,
         summary: report.summary,
@@ -95,6 +96,7 @@ async function main() {
 
     await prisma.aIPrediction.create({
       data: {
+        userId: user.id,
         ticker: report.ticker,
         signalType: signal.signalType,
         sector: stock.sector,
@@ -112,27 +114,39 @@ async function main() {
 
   for (const signal of topSignals.slice(0, 3)) {
     const stock = mockStocks.find((item) => item.ticker === signal.ticker);
-    await prisma.watchlistItem.upsert({
-      where: { ticker: signal.ticker },
-      update: {
-        companyName: stock?.companyName ?? signal.ticker,
-        score: signal.score,
-        riskLevel: signal.riskLevel,
-        decision: signal.decision,
-        notes: "Seed watchlist item from latest market scan."
-      },
-      create: {
-        ticker: signal.ticker,
-        companyName: stock?.companyName ?? signal.ticker,
-        score: signal.score,
-        riskLevel: signal.riskLevel,
-        decision: signal.decision,
-        notes: "Seed watchlist item from latest market scan."
-      }
+    const existing = await prisma.watchlistItem.findFirst({
+      where: { userId: user.id, assetType: "stock", ticker: signal.ticker }
     });
+    const watchlistData = {
+      userId: user.id,
+      assetType: "stock",
+      ticker: signal.ticker,
+      companyName: stock?.companyName ?? signal.ticker,
+      score: signal.score,
+      riskLevel: signal.riskLevel,
+      decision: signal.decision,
+      notes: "Seed watchlist item from latest market scan."
+    };
+    if (existing) {
+      await prisma.watchlistItem.update({
+        where: { id: existing.id },
+        data: {
+          companyName: watchlistData.companyName,
+          score: watchlistData.score,
+          riskLevel: watchlistData.riskLevel,
+          decision: watchlistData.decision,
+          notes: watchlistData.notes
+        }
+      });
+    } else {
+      await prisma.watchlistItem.create({
+        data: watchlistData
+      });
+    }
   }
 
   const planOne = await generateTradePlan({
+    userId: user.id,
     ticker: "NVDA",
     currentPrice: 128.44,
     aiScore: 82,
@@ -140,6 +154,7 @@ async function main() {
     dailyChangePercent: 5.39
   });
   const planTwo = await generateTradePlan({
+    userId: user.id,
     ticker: "AMD",
     currentPrice: 164.9,
     aiScore: 76,
@@ -150,6 +165,7 @@ async function main() {
   await prisma.paperTrade.createMany({
     data: [
       {
+        userId: user.id,
         ticker: "NVDA",
         entryPrice: planOne.entryPrice,
         currentPrice: 130.12,
@@ -163,6 +179,7 @@ async function main() {
         tradePlanId: planOne.id
       },
       {
+        userId: user.id,
         ticker: "AMD",
         entryPrice: planTwo.entryPrice,
         currentPrice: 162.4,
@@ -181,6 +198,7 @@ async function main() {
   await prisma.journalEntry.createMany({
     data: [
       {
+        userId: user.id,
         ticker: "PLTR",
         decision: "Watch",
         entryReason: "Strong AI software momentum but valuation risk looked elevated.",
@@ -192,6 +210,7 @@ async function main() {
         result: "No trade"
       },
       {
+        userId: user.id,
         ticker: "TSLA",
         decision: "Demo trade",
         entryReason: "High-volume breakout with defined stop below intraday support.",
@@ -207,6 +226,7 @@ async function main() {
 
   await prisma.alert.create({
     data: {
+      userId: user.id,
       ticker: "NVDA",
       alertType: "Price",
       targetPrice: 124,
@@ -250,6 +270,7 @@ async function main() {
   await prisma.paperTradeEvent.createMany({
     data: [
       {
+        userId: user.id,
         paperTradeId: null,
         ticker: "NVDA",
         eventType: "paper trade opened",
@@ -258,6 +279,7 @@ async function main() {
         message: "NVDA seed paper trade opened for simulation."
       },
       {
+        userId: user.id,
         paperTradeId: null,
         ticker: "AMD",
         eventType: "paper trade opened",
@@ -270,6 +292,7 @@ async function main() {
 
   await prisma.riskEvent.create({
     data: {
+      userId: user.id,
       ticker: "RGTI",
       rule: "auto-paper-trade-guardrails",
       severity: "High",
@@ -280,7 +303,7 @@ async function main() {
   });
 
   await ensureAutomationJobs();
-  await calculateStrategyPerformance("seed");
+  await calculateStrategyPerformance("seed", undefined, user.id);
 }
 
 main()

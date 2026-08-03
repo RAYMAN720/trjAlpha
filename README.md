@@ -24,7 +24,7 @@ Historical data for backtests / Alpaca paper brokerage for paper execution
 
 | Component | Responsibility |
 |---|---|
-| React frontend | Maintenance page now; dashboard, LEAN jobs, research, risk visibility, emergency controls when re-enabled |
+| React frontend | Dashboard, LEAN jobs, research, risk visibility, paper-trading views, and emergency controls |
 | TypeScript API | Users, AI/news research, audit records, configuration, gateway adapter |
 | Worker | Scheduled scans, research jobs, paper trade updates, learning and risk checks |
 | Postgres | Persistent application data |
@@ -33,7 +33,7 @@ Historical data for backtests / Alpaca paper brokerage for paper execution
 | LEAN engine | Market events, portfolio accounting, orders, fills, fees, brokerage models, calendars, corporate actions, results |
 | C# algorithm | Trend Breakout V2 signal, sizing, portfolio circuit breakers, protective orders and exits |
 
-The old Python service is removed. `TRADING_ENGINE=lean` also prevents the legacy TypeScript automation worker from opening new positions, so LEAN is the single automated execution authority. Legacy simulator positions can still be monitored and closed.
+The old Python service is removed. The default app mode is `TRADING_ENGINE=native`, which lets the TypeScript automation worker open simulated paper trades after the scanner, research, and risk checks pass. `TRADING_ENGINE=lean` is still available for a stricter LEAN-only setup, but it should only be used when a LEAN gateway is configured and execution is intentionally enabled for paper jobs.
 
 ## What “full LEAN” means here
 
@@ -50,7 +50,7 @@ This edition is intentionally paper-only:
 - The gateway refuses to start execution when the live-money flag is enabled.
 - A minimum-length gateway token is required when Docker execution is enabled.
 - Only one LEAN paper session may be active.
-- The legacy direct broker adapter is blocked when `TRADING_ENGINE=lean`.
+- Real broker/live-money submission remains blocked unless every explicit paper-only guard is changed.
 
 These controls reduce configuration mistakes, but they are not a guarantee of profitability or operational safety.
 
@@ -243,10 +243,15 @@ Use Render or the same VPS for the React frontend, TypeScript API, and PostgreSQ
 The API needs:
 
 ```env
-TRADING_ENGINE=lean
+TRADING_ENGINE=native
+ALLOW_LIVE_BROKER_TRADING=false
+```
+
+To use LEAN as the paper execution authority instead of the native simulator, set `TRADING_ENGINE=lean` and also configure:
+
+```env
 LEAN_ENGINE_URL=https://your-private-lean-gateway.example
 LEAN_ENGINE_TOKEN=the-shared-secret
-ALLOW_LIVE_BROKER_TRADING=false
 ```
 
 Protect the gateway with a firewall, TLS reverse proxy, IP allow-list, and its bearer token. Do not expose the Docker socket or the gateway directly to the public internet.

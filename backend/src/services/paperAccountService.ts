@@ -1,11 +1,11 @@
 import type { PaperTrade, Prisma } from "@prisma/client";
 import { prisma } from "../utils/prisma.js";
 import { marketDataProvider, marketForAssetType, normalizeAssetType, type AssetType } from "./marketDataProvider.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 type PrismaLike = typeof prisma | Prisma.TransactionClient;
 
-export const PAPER_ACCOUNT_USER_ID = "demo@tradepilot.local";
-export const PAPER_ACCOUNT_CURRENCY = "EUR";
+export const PAPER_ACCOUNT_CURRENCY = "USD";
 export const PAPER_STARTING_BALANCE = 500;
 
 function money(value: number) {
@@ -44,18 +44,19 @@ async function getAssetName(assetType: string, ticker: string) {
   return asset?.companyName ?? ticker;
 }
 
-async function ensurePaperAccount(client: PrismaLike = prisma) {
-  return client.paperAccount.upsert({
-    where: { userId: PAPER_ACCOUNT_USER_ID },
-    update: {},
-    create: {
-      userId: PAPER_ACCOUNT_USER_ID,
-      currency: PAPER_ACCOUNT_CURRENCY,
-      startingBalance: PAPER_STARTING_BALANCE,
-      cashBalance: PAPER_STARTING_BALANCE,
-      availableCash: PAPER_STARTING_BALANCE,
-      totalEquity: PAPER_STARTING_BALANCE,
-      buyingPowerPaper: PAPER_STARTING_BALANCE
+async function ensurePaperAccount(client: PrismaLike = prisma, userId?: string | null) {
+  const user = await getOrCreateUserSettings(userId);
+  const existing = await client.paperAccount.findFirst({ where: { userId: user.id } });
+  if (existing) return existing;
+  return client.paperAccount.create({
+    data: {
+      userId: user.id,
+      currency: user.displayCurrency || PAPER_ACCOUNT_CURRENCY,
+      startingBalance: user.demoCapital || PAPER_STARTING_BALANCE,
+      cashBalance: user.demoCapital || PAPER_STARTING_BALANCE,
+      availableCash: user.demoCapital || PAPER_STARTING_BALANCE,
+      totalEquity: user.demoCapital || PAPER_STARTING_BALANCE,
+      buyingPowerPaper: user.demoCapital || PAPER_STARTING_BALANCE
     }
   });
 }
@@ -139,9 +140,9 @@ async function createSnapshot(client: PrismaLike, account: Awaited<ReturnType<ty
   });
 }
 
-export async function reconcilePaperAccount(client: PrismaLike = prisma, options: { createSnapshot?: boolean } = {}) {
-  const account = await ensurePaperAccount(client);
-  const trades = await client.paperTrade.findMany({ orderBy: { openedAt: "asc" } });
+export async function reconcilePaperAccount(client: PrismaLike = prisma, options: { createSnapshot?: boolean; userId?: string | null } = {}) {
+  const account = await ensurePaperAccount(client, options.userId);
+  const trades = await client.paperTrade.findMany({ where: { userId: account.userId }, orderBy: { openedAt: "asc" } });
 
   for (const trade of trades) {
     await syncPaperTradeToPosition(client, trade, account.id);
@@ -158,7 +159,7 @@ export async function reconcilePaperAccount(client: PrismaLike = prisma, options
 
   const [positions, executionTotals] = await Promise.all([
     client.paperPosition.findMany({ where: { accountId: account.id } }),
-    client.executionSimulation.aggregate({ _sum: { fee: true, slippageAmount: true } })
+    client.executionSimulation.aggregate({ where: { userId: account.userId }, _sum: { fee: true, slippageAmount: true } })
   ]);
   const openPositions = positions.filter((position) => isOpen(position.status));
   const closedPositions = positions.filter((position) => !isOpen(position.status));
@@ -218,13 +219,14 @@ async function findPositionForTrade(client: PrismaLike, tradeId: string) {
 }
 
 export async function registerPaperTradeOpened(client: PrismaLike, trade: PaperTrade) {
-  const account = await reconcilePaperAccount(client, { createSnapshot: false });
+  const account = await reconcilePaperAccount(client, { createSnapshot: false, userId: trade.userId });
   const position = await findPositionForTrade(client, trade.id);
   const strategyName = position?.strategyName ?? (await tradeStrategyName(client, trade));
   const label = `BUY @ ${trade.entryPrice.toFixed(2)}`;
   await client.paperTradeEvent.create({
     data: {
       accountId: account.id,
+      userId: trade.userId,
       positionId: position?.id,
       paperTradeId: trade.id,
       assetType: trade.assetType,
@@ -258,16 +260,16 @@ export async function registerPaperTradeOpened(client: PrismaLike, trade: PaperT
     }
   });
 
-  return reconcilePaperAccount(client);
+  return reconcilePaperAccount(client, { userId: trade.userId });
 }
 
 export async function registerPaperTradePriceUpdate(client: PrismaLike, trade: PaperTrade) {
-  await reconcilePaperAccount(client, { createSnapshot: false });
+  await reconcilePaperAccount(client, { createSnapshot: false, userId: trade.userId });
   return findPositionForTrade(client, trade.id);
 }
 
 export async function registerPaperTradeClosed(client: PrismaLike, trade: PaperTrade, reason = "manual_close") {
-  const account = await reconcilePaperAccount(client, { createSnapshot: false });
+  const account = await reconcilePaperAccount(client, { createSnapshot: false, userId: trade.userId });
   const position = await findPositionForTrade(client, trade.id);
   const exitPrice = trade.exitPrice ?? trade.currentPrice;
   const strategyName = position?.strategyName ?? (await tradeStrategyName(client, trade));
@@ -278,6 +280,7 @@ export async function registerPaperTradeClosed(client: PrismaLike, trade: PaperT
   await client.paperTradeEvent.create({
     data: {
       accountId: account.id,
+      userId: trade.userId,
       positionId: position?.id,
       paperTradeId: trade.id,
       assetType: trade.assetType,
@@ -312,15 +315,15 @@ export async function registerPaperTradeClosed(client: PrismaLike, trade: PaperT
     }
   });
 
-  return reconcilePaperAccount(client);
+  return reconcilePaperAccount(client, { userId: trade.userId });
 }
 
-export async function getPaperAccountSummary(assetType?: AssetType) {
-  const account = await reconcilePaperAccount();
+export async function getPaperAccountSummary(assetType?: AssetType, userId?: string | null) {
+  const account = await reconcilePaperAccount(prisma, { userId });
   const where = assetType ? { accountId: account.id, assetType } : { accountId: account.id };
   const eventWhere = assetType
-    ? { assetType, OR: [{ accountId: account.id }, { accountId: null }] }
-    : { OR: [{ accountId: account.id }, { accountId: null }] };
+    ? { assetType, OR: [{ accountId: account.id }, { userId: account.userId }] }
+    : { OR: [{ accountId: account.id }, { userId: account.userId }] };
   const [openPositions, closedPositions, snapshots, events] = await Promise.all([
     prisma.paperPosition.findMany({ where: { ...where, status: "Open" }, orderBy: { openedAt: "desc" } }),
     prisma.paperPosition.findMany({ where: { ...where, status: { not: "Open" } }, orderBy: { closedAt: "desc" }, take: 100 }),
@@ -342,21 +345,23 @@ export async function getPaperAccountSummary(assetType?: AssetType) {
   };
 }
 
-export async function getPaperAccountEquity() {
-  const account = await reconcilePaperAccount();
+export async function getPaperAccountEquity(userId?: string | null) {
+  const account = await reconcilePaperAccount(prisma, { userId });
   const snapshots = await prisma.equitySnapshot.findMany({ where: { accountId: account.id }, orderBy: { createdAt: "asc" }, take: 240 });
   return { account, snapshots };
 }
 
-export async function resetPaperAccount() {
+export async function resetPaperAccount(userId?: string | null) {
   return prisma.$transaction(async (tx) => {
-    const account = await ensurePaperAccount(tx);
-    await tx.tradeChartMarker.deleteMany({});
-    await tx.executionSimulation.deleteMany({});
+    const account = await ensurePaperAccount(tx, userId);
+    const tradeIds = (await tx.paperTrade.findMany({ where: { userId: account.userId }, select: { id: true } })).map((trade) => trade.id);
+    const positionIds = (await tx.paperPosition.findMany({ where: { accountId: account.id }, select: { id: true } })).map((position) => position.id);
+    await tx.tradeChartMarker.deleteMany({ where: { positionId: { in: positionIds } } });
+    await tx.executionSimulation.deleteMany({ where: { OR: [{ userId: account.userId }, { paperTradeId: { in: tradeIds } }] } });
     await tx.paperTradeEvent.deleteMany({ where: { accountId: account.id } });
     await tx.paperPosition.deleteMany({ where: { accountId: account.id } });
     await tx.equitySnapshot.deleteMany({ where: { accountId: account.id } });
-    await tx.paperTrade.deleteMany({});
+    await tx.paperTrade.deleteMany({ where: { userId: account.userId } });
     const reset = await tx.paperAccount.update({
       where: { id: account.id },
       data: {

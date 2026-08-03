@@ -1,16 +1,17 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { emailDeliveryConfigured, getOwnerEmail, maskEmail, sendAccessCodeEmail } from "./emailService.js";
+import { emailDeliveryConfigured, maskEmail, sendAccessCodeEmail } from "./emailService.js";
+import { getOrCreateUserByEmail, normalizeUserEmail, registerUser } from "./userSettingsService.js";
 
 type AccessTokenPayload = {
-  sub: "tradepilot-owner";
-  name: "Rayann";
-  role: "owner";
+  sub: string;
+  email: string;
+  name: string;
+  role: "user";
   iat: number;
   exp: number;
 };
 
-const ownerName = "Rayann";
 const loginCodeTtlMs = 10 * 60 * 1000;
 const loginCodeCooldownMs = 45 * 1000;
 const maxLoginCodeAttempts = 5;
@@ -20,6 +21,16 @@ type LoginCodeRecord = {
   expiresAt: number;
   attempts: number;
   lastSentAt: number;
+};
+
+type GoogleTokenInfo = {
+  aud?: string;
+  sub?: string;
+  email?: string;
+  email_verified?: string | boolean;
+  name?: string;
+  picture?: string;
+  error_description?: string;
 };
 
 export class AuthCodeError extends Error {
@@ -32,6 +43,14 @@ export class AuthCodeError extends Error {
 }
 
 const loginCodes = new Map<string, LoginCodeRecord>();
+
+declare global {
+  namespace Express {
+    interface Request {
+      appUser?: AccessTokenPayload;
+    }
+  }
+}
 
 function base64UrlEncode(value: string) {
   return Buffer.from(value).toString("base64url");
@@ -88,10 +107,10 @@ export function verifyPasscode(passcode: string) {
   return safeEquals(passcode, expected);
 }
 
-export async function requestLoginCode() {
+export async function requestLoginCode(emailInput?: string | null) {
   cleanupExpiredCodes();
 
-  const email = getOwnerEmail();
+  const email = normalizeUserEmail(emailInput);
   const existing = loginCodes.get(email);
   const now = Date.now();
 
@@ -123,10 +142,15 @@ export async function requestLoginCode() {
   };
 }
 
-export function verifyLoginCode(code: string) {
+export async function registerAndRequestLoginCode(input: { name?: string | null; email?: string | null }) {
+  const user = await registerUser(input);
+  return requestLoginCode(user.email);
+}
+
+export async function verifyLoginCode(code: string, emailInput?: string | null) {
   cleanupExpiredCodes();
 
-  const email = getOwnerEmail();
+  const email = normalizeUserEmail(emailInput);
   const cleanCode = code.trim();
   const record = loginCodes.get(email);
 
@@ -156,16 +180,19 @@ export function verifyLoginCode(code: string) {
   }
 
   loginCodes.delete(email);
-  return createAccessToken();
+  const user = await getOrCreateUserByEmail(email);
+  return createAccessToken({ userId: user.id, email: user.email, name: user.name });
 }
 
-export function createAccessToken() {
+export function createAccessToken(input?: { userId?: string; email?: string; name?: string }) {
   const now = Math.floor(Date.now() / 1000);
   const ttlHours = Number(process.env.APP_AUTH_TOKEN_HOURS ?? 12);
+  const email = normalizeUserEmail(input?.email);
   const payload: AccessTokenPayload = {
-    sub: "tradepilot-owner",
-    name: ownerName,
-    role: "owner",
+    sub: input?.userId ?? email,
+    email,
+    name: input?.name ?? "Trader",
+    role: "user",
     iat: now,
     exp: now + Math.max(1, ttlHours) * 60 * 60
   };
@@ -175,8 +202,46 @@ export function createAccessToken() {
   return {
     token: `${encodedPayload}.${signature}`,
     expiresAt: new Date(payload.exp * 1000).toISOString(),
-    displayName: ownerName
+    displayName: payload.name,
+    email: payload.email
   };
+}
+
+export async function loginWithGoogleCredential(credential?: string | null) {
+  const cleanCredential = String(credential ?? "").trim();
+  const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() || process.env.VITE_GOOGLE_CLIENT_ID?.trim();
+
+  if (!googleClientId) {
+    throw new AuthCodeError("Google login is not configured yet. Add GOOGLE_CLIENT_ID in Render, then redeploy.", 503);
+  }
+
+  if (!cleanCredential) {
+    throw new AuthCodeError("Missing Google sign-in credential.", 400);
+  }
+
+  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(cleanCredential)}`);
+  const profile = (await response.json().catch(() => ({}))) as GoogleTokenInfo;
+
+  if (!response.ok || profile.error_description) {
+    throw new AuthCodeError(profile.error_description ?? "Google sign-in could not be verified.", 401);
+  }
+
+  if (profile.aud !== googleClientId) {
+    throw new AuthCodeError("Google sign-in was issued for a different app.", 401);
+  }
+
+  if (!profile.email || profile.email_verified === false || profile.email_verified === "false") {
+    throw new AuthCodeError("Google account email is not verified.", 401);
+  }
+
+  const user = await getOrCreateUserByEmail(profile.email, {
+    name: profile.name,
+    avatarUrl: profile.picture,
+    authProvider: "google",
+    googleSubject: profile.sub
+  });
+
+  return createAccessToken({ userId: user.id, email: user.email, name: user.name });
 }
 
 export function verifyAccessToken(token?: string | null) {
@@ -190,7 +255,7 @@ export function verifyAccessToken(token?: string | null) {
 
   try {
     const payload = JSON.parse(base64UrlDecode(encodedPayload)) as AccessTokenPayload;
-    if (payload.sub !== "tradepilot-owner" || payload.role !== "owner") return null;
+    if (!payload.sub || payload.role !== "user") return null;
     if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
@@ -207,5 +272,6 @@ export function requireAppAuth(req: Request, res: Response, next: NextFunction) 
     return res.status(401).json({ error: "Unauthorized. Enter a TradePilot email access code." });
   }
 
+  req.appUser = payload;
   return next();
 }

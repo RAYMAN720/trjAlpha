@@ -34,6 +34,16 @@ type YahooQuoteResponse = { quoteResponse?: { result?: YahooQuote[] } };
 type YahooChartResponse = {
   chart?: {
     result?: Array<{
+      meta?: {
+        symbol?: string;
+        regularMarketPrice?: number;
+        chartPreviousClose?: number;
+        regularMarketTime?: number;
+        regularMarketVolume?: number;
+        longName?: string;
+        shortName?: string;
+        marketState?: string;
+      };
       timestamp?: number[];
       indicators?: {
         quote?: Array<{
@@ -53,6 +63,7 @@ type AlpacaBar = { o?: number; h?: number; l?: number; c?: number; t?: string; v
 type AlpacaTrade = { p?: number; t?: string };
 type AlpacaSnapshot = { latestTrade?: AlpacaTrade; dailyBar?: AlpacaBar; prevDailyBar?: AlpacaBar };
 type AlpacaBarsResponse = { bars?: AlpacaBar[]; next_page_token?: string | null };
+type YahooChartQuote = NonNullable<NonNullable<YahooChartResponse["chart"]>["result"]>[number]["meta"];
 
 const refreshMs = Number(process.env.STOCK_PRICE_REFRESH_MS ?? 5_000);
 const yahooBaseUrl = process.env.STOCK_PRICE_BASE_URL?.trim() || "https://query1.finance.yahoo.com";
@@ -151,6 +162,26 @@ async function fetchYahooQuotes() {
   return quotes;
 }
 
+async function fetchYahooChartQuote(symbol: string) {
+  const params = new URLSearchParams({ interval: "1d", range: "5d", includePrePost: "false", events: "div,splits" });
+  const payload = await fetchJson<YahooChartResponse>(`${yahooBaseUrl}/v8/finance/chart/${encodeURIComponent(symbol)}?${params.toString()}`, {
+    headers: { accept: "application/json", "user-agent": "TradePilotAI/1.0" }
+  }, 7_000);
+  const result = payload.chart?.result?.[0];
+  const meta = result?.meta;
+  if (!meta?.symbol || !isPositiveNumber(meta.regularMarketPrice) || !isPositiveNumber(meta.regularMarketTime)) {
+    throw new Error(`Yahoo Finance chart quote was empty for ${symbol}.`);
+  }
+  return meta;
+}
+
+async function fetchYahooChartQuotes() {
+  const settled = await Promise.allSettled(stockSymbols.map((symbol) => fetchYahooChartQuote(symbol)));
+  const quotes = settled.flatMap((result) => (result.status === "fulfilled" && result.value ? [result.value] : []));
+  if (!quotes.length) throw new Error("Yahoo Finance chart quote fallback returned no usable quotes.");
+  return quotes;
+}
+
 function mergeAlpacaSnapshots(snapshots: Record<string, AlpacaSnapshot>) {
   return mockStocks.map((stock) => {
     const snapshot = snapshots[stock.ticker];
@@ -200,6 +231,29 @@ function mergeYahooQuotes(quotes: YahooQuote[]) {
   });
 }
 
+function mergeYahooChartQuotes(quotes: YahooChartQuote[]) {
+  const bySymbol = new Map(quotes.map((quote) => [String(quote?.symbol ?? "").toUpperCase(), quote]));
+  return mockStocks.map((stock) => {
+    const quote = bySymbol.get(stock.ticker);
+    if (!quote || !isPositiveNumber(quote.regularMarketPrice) || !isPositiveNumber(quote.regularMarketTime)) {
+      return { ...stock, quoteSource: "Yahoo Finance chart quote unavailable (not executable)", quoteUpdatedAt: "", marketState: "Unavailable" };
+    }
+    const previousClose = isPositiveNumber(quote.chartPreviousClose) ? quote.chartPreviousClose : stock.previousClose;
+    const price = roundPrice(quote.regularMarketPrice);
+    return {
+      ...stock,
+      companyName: quote.longName || quote.shortName || stock.companyName,
+      price,
+      previousClose: roundPrice(previousClose),
+      dailyChangePercent: previousClose > 0 ? Number((((price - previousClose) / previousClose) * 100).toFixed(2)) : stock.dailyChangePercent,
+      volume: safeDbInt(quote.regularMarketVolume, stock.volume),
+      quoteSource: "Yahoo Finance public chart feed",
+      quoteUpdatedAt: quoteTimestampToIso(quote.regularMarketTime),
+      marketState: quote.marketState ?? "Chart quote"
+    };
+  });
+}
+
 export async function getLiveStockUniverse() {
   if (cachedUniverse && cacheExpiresAt > Date.now()) return cachedUniverse;
   let lastError = "No live provider responded.";
@@ -211,7 +265,12 @@ export async function getLiveStockUniverse() {
       cachedUniverse = mergeYahooQuotes(await fetchYahooQuotes());
     } catch (yahooError) {
       lastError = yahooError instanceof Error ? yahooError.message : lastError;
-      cachedUniverse = staticReferenceUniverse(lastError);
+      try {
+        cachedUniverse = mergeYahooChartQuotes(await fetchYahooChartQuotes());
+      } catch (chartError) {
+        lastError = chartError instanceof Error ? chartError.message : lastError;
+        cachedUniverse = staticReferenceUniverse(lastError);
+      }
     }
   }
   cacheExpiresAt = Date.now() + Math.max(refreshMs, 1_000);

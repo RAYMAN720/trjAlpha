@@ -26,6 +26,10 @@ services:
         value: "12"
       - key: APP_ENABLE_PASSCODE_LOGIN
         value: "false"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: APP_EMAIL_FROM
@@ -101,7 +105,7 @@ services:
       - key: PAPER_TRADING_ENABLED
         value: "true"
       - key: TRADING_ENGINE
-        value: lean
+        value: native
       - key: ALLOW_LIVE_BROKER_TRADING
         value: "false"
       - key: AUTO_SUBMIT_BROKER_PAPER_ORDERS

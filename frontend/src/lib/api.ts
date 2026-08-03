@@ -41,6 +41,7 @@ import type {
   TradeChartMarker,
   TradePlan,
   UserSettings,
+  UserProfile,
   WeeklyTraderReport,
   WatchlistItem
 } from "./types";
@@ -66,6 +67,8 @@ function marketPrefix(market?: MarketMode) {
 
 export type AuthSession = {
   ok: boolean;
+  userId: string;
+  email: string;
   displayName: string;
   expiresAt: string;
 };
@@ -74,6 +77,7 @@ export type LoginResponse = {
   token: string;
   expiresAt: string;
   displayName: string;
+  email: string;
 };
 
 export type LoginCodeResponse = {
@@ -121,9 +125,13 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
 export const api = {
   health: () => apiRequest<{ ok: boolean; mode: string; realTradingEnabled: boolean }>("/health"),
   login: (passcode: string) => apiRequest<LoginResponse>("/auth/login", { method: "POST", body: { passcode }, auth: false }),
-  requestLoginCode: () => apiRequest<LoginCodeResponse>("/auth/code/request", { method: "POST", body: {}, auth: false }),
-  verifyLoginCode: (code: string) => apiRequest<LoginResponse>("/auth/code/verify", { method: "POST", body: { code }, auth: false }),
+  requestLoginCode: (email: string) => apiRequest<LoginCodeResponse>("/auth/code/request", { method: "POST", body: { email }, auth: false }),
+  register: (body: { name: string; email: string }) => apiRequest<LoginCodeResponse>("/auth/register", { method: "POST", body, auth: false }),
+  verifyLoginCode: (code: string, email: string) => apiRequest<LoginResponse>("/auth/code/verify", { method: "POST", body: { code, email }, auth: false }),
+  googleLogin: (credential: string) => apiRequest<LoginResponse>("/auth/google", { method: "POST", body: { credential }, auth: false }),
   session: () => apiRequest<AuthSession>("/auth/session"),
+  profile: () => apiRequest<UserProfile>("/profile"),
+  updateProfile: (body: Partial<UserProfile>) => apiRequest<UserProfile>("/profile", { method: "PUT", body }),
   settings: () => apiRequest<UserSettings>("/settings"),
   updateSettings: (body: Partial<UserSettings>) => apiRequest<UserSettings>("/settings", { method: "PUT", body }),
   dashboard: (market: MarketMode) => apiRequest<AssetDashboard>(`${marketPrefix(market)}/dashboard`),

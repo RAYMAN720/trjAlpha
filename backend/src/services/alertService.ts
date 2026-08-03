@@ -2,6 +2,7 @@ import { prisma } from "../utils/prisma.js";
 import type { AssetType } from "./marketDataProvider.js";
 
 export async function createAlert(input: {
+  userId?: string | null;
   assetType?: AssetType;
   ticker?: string;
   alertType: string;
@@ -11,6 +12,7 @@ export async function createAlert(input: {
 }) {
   return prisma.alert.create({
     data: {
+      userId: input.userId,
       assetType: input.assetType ?? "stock",
       ticker: input.ticker ?? "SYSTEM",
       alertType: input.alertType,

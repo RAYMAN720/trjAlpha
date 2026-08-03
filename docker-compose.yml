@@ -64,7 +64,7 @@ services:
       MISTRAL_API_KEY: ""
       MISTRAL_MODEL: mistral-small-latest
       PAPER_TRADING_ENABLED: "true"
-      TRADING_ENGINE: lean
+      TRADING_ENGINE: native
       ALPACA_TRADING_ENV: paper
       ALPACA_TRADING_BASE_URL: https://paper-api.alpaca.markets/v2
       ALPACA_AUTH_MODE: api_key
@@ -116,7 +116,7 @@ services:
       AI_PROVIDER: mistral
       TECHNICAL_FALLBACK_ENABLED: "true"
       PAPER_TRADING_ENABLED: "true"
-      TRADING_ENGINE: lean
+      TRADING_ENGINE: native
       ALPACA_TRADING_ENV: paper
       ALPACA_TRADING_BASE_URL: https://paper-api.alpaca.markets/v2
       ALLOW_LIVE_BROKER_TRADING: "false"

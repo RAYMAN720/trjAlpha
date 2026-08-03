@@ -2,6 +2,7 @@ import { prisma } from "../utils/prisma.js";
 import { createAlert } from "./alertService.js";
 import { learningAgent } from "./agentService.js";
 import { marketDataProvider, marketForAssetType, type AssetType, type MarketChartPoint } from "./marketDataProvider.js";
+import { getOrCreateUserSettings } from "./userSettingsService.js";
 
 type GroupStats = { key: string; count: number; wins: number; gain: number; loss: number };
 
@@ -35,10 +36,11 @@ function returnAtHorizon(chart: MarketChartPoint[], createdAt: Date, horizonDays
   return Number((((point.close - entryPrice) / entryPrice) * 100).toFixed(2));
 }
 
-export async function updatePredictionOutcomes(assetType?: AssetType) {
+export async function updatePredictionOutcomes(assetType?: AssetType, userId?: string | null) {
   const pending = await prisma.aIPrediction.findMany({
     where: {
       outcomeStatus: { not: "Complete" },
+      userId: userId ?? null,
       ...(assetType ? { assetType } : {})
     },
     take: 100,
@@ -70,17 +72,18 @@ export async function updatePredictionOutcomes(assetType?: AssetType) {
   }
 }
 
-export async function calculateStrategyPerformance(jobName = "dailyReviewJob", assetType?: AssetType) {
-  await updatePredictionOutcomes(assetType);
+export async function calculateStrategyPerformance(jobName = "dailyReviewJob", assetType?: AssetType, userId?: string | null) {
+  const ownerUserId = userId ?? (await getOrCreateUserSettings()).id;
+  await updatePredictionOutcomes(assetType, ownerUserId);
   const performanceScope = assetType ? "assetType" : "global";
   const performanceScopeValue = assetType ?? "auto-paper-trading";
   const predictions = await prisma.aIPrediction.findMany({
-    where: { oneDayReturn: { not: null }, ...(assetType ? { assetType } : {}) },
+    where: { userId: ownerUserId, oneDayReturn: { not: null }, ...(assetType ? { assetType } : {}) },
     orderBy: { createdAt: "desc" },
     take: 300
   });
   const trades = await prisma.paperTrade.findMany({
-    where: { status: { not: "Open" }, ...(assetType ? { assetType } : {}) },
+    where: { userId: ownerUserId, status: { not: "Open" }, ...(assetType ? { assetType } : {}) },
     orderBy: { closedAt: "asc" }
   });
   const wins = trades.filter((trade) => trade.profitLoss > 0);
@@ -112,35 +115,39 @@ export async function calculateStrategyPerformance(jobName = "dailyReviewJob", a
   const averageLoss = losses.length ? totalLoss / losses.length : 0;
   const profitFactor = totalLoss > 0 ? totalGain / totalLoss : totalGain > 0 ? totalGain : 0;
 
-  const performance = await prisma.strategyPerformance.upsert({
-    where: { scope_scopeValue: { scope: performanceScope, scopeValue: performanceScopeValue } },
-    update: {
-      tradeCount, winRate, averageGain, averageLoss, profitFactor,
-      maxDrawdown: Math.abs(maxDrawdown),
-      bestSignalType: signal.best,
-      worstSignalType: signal.worst,
-      bestSector: sector.best,
-      worstSector: sector.worst
-    },
-    create: {
-      scope: performanceScope,
-      scopeValue: performanceScopeValue,
-      tradeCount, winRate, averageGain, averageLoss, profitFactor,
-      maxDrawdown: Math.abs(maxDrawdown),
-      bestSignalType: signal.best,
-      worstSignalType: signal.worst,
-      bestSector: sector.best,
-      worstSector: sector.worst
-    }
+  const existingPerformance = await prisma.strategyPerformance.findFirst({
+    where: { userId: ownerUserId, scope: performanceScope, scopeValue: performanceScopeValue }
   });
+  const performanceData = {
+    tradeCount, winRate, averageGain, averageLoss, profitFactor,
+    maxDrawdown: Math.abs(maxDrawdown),
+    bestSignalType: signal.best,
+    worstSignalType: signal.worst,
+    bestSector: sector.best,
+    worstSector: sector.worst
+  };
+  const performance = existingPerformance
+    ? await prisma.strategyPerformance.update({
+        where: { id: existingPerformance.id },
+        data: performanceData
+      })
+    : await prisma.strategyPerformance.create({
+        data: {
+          userId: ownerUserId,
+          scope: performanceScope,
+          scopeValue: performanceScopeValue,
+          ...performanceData
+        }
+      });
 
   const insightText = signal.best && signal.worst
     ? `Verified market outcomes currently perform better on ${signal.best.toLowerCase()} than ${signal.worst.toLowerCase()} setups.`
     : "The app is still collecting enough verified market outcomes to compare signal types.";
   const confidence = predictions.length >= 30 ? 75 : predictions.length >= 10 ? 60 : 35;
-  await prisma.learningInsight.create({ data: { assetType: assetType ?? "stock", title: "Latest verified strategy read", insight: insightText, confidence, category: "performance" } });
+  await prisma.learningInsight.create({ data: { userId: ownerUserId, assetType: assetType ?? "stock", title: "Latest verified strategy read", insight: insightText, confidence, category: "performance" } });
   await learningAgent({ assetType, insight: insightText, confidence, category: "performance" }, jobName);
   await createAlert({
+    userId: ownerUserId,
     assetType: assetType ?? "stock",
     ticker: "SYSTEM",
     alertType: "daily report ready",
@@ -150,10 +157,12 @@ export async function calculateStrategyPerformance(jobName = "dailyReviewJob", a
   return performance;
 }
 
-export async function calculateStrategyPerformanceByName(strategyName: string, assetType: AssetType = "stock") {
+export async function calculateStrategyPerformanceByName(strategyName: string, assetType: AssetType = "stock", userId?: string | null) {
+  const ownerUserId = userId ?? (await getOrCreateUserSettings()).id;
   const trades = await prisma.paperTrade.findMany({
     where: {
       assetType,
+      userId: ownerUserId,
       status: { not: "Open" },
       tradePlan: { strategyName }
     },
@@ -172,38 +181,41 @@ export async function calculateStrategyPerformanceByName(strategyName: string, a
     maxDrawdown = Math.max(maxDrawdown, peak > 0 ? ((peak - equity) / peak) * 100 : 0);
   }
   const tradeCount = trades.length;
-  const performance = await prisma.strategyPerformance.upsert({
-    where: { scope_scopeValue: { scope: "strategy", scopeValue: strategyName } },
-    update: {
-      tradeCount,
-      winRate: tradeCount ? (wins.length / tradeCount) * 100 : 0,
-      averageGain: wins.length ? totalGain / wins.length : 0,
-      averageLoss: losses.length ? totalLoss / losses.length : 0,
-      profitFactor: totalLoss > 0 ? totalGain / totalLoss : totalGain > 0 ? totalGain : 0,
-      maxDrawdown
-    },
-    create: {
-      scope: "strategy",
-      scopeValue: strategyName,
-      tradeCount,
-      winRate: tradeCount ? (wins.length / tradeCount) * 100 : 0,
-      averageGain: wins.length ? totalGain / wins.length : 0,
-      averageLoss: losses.length ? totalLoss / losses.length : 0,
-      profitFactor: totalLoss > 0 ? totalGain / totalLoss : totalGain > 0 ? totalGain : 0,
-      maxDrawdown
-    }
+  const performanceData = {
+    tradeCount,
+    winRate: tradeCount ? (wins.length / tradeCount) * 100 : 0,
+    averageGain: wins.length ? totalGain / wins.length : 0,
+    averageLoss: losses.length ? totalLoss / losses.length : 0,
+    profitFactor: totalLoss > 0 ? totalGain / totalLoss : totalGain > 0 ? totalGain : 0,
+    maxDrawdown
+  };
+  const existingPerformance = await prisma.strategyPerformance.findFirst({
+    where: { userId: ownerUserId, scope: "strategy", scopeValue: strategyName }
   });
+  const performance = existingPerformance
+    ? await prisma.strategyPerformance.update({
+        where: { id: existingPerformance.id },
+        data: performanceData
+      })
+    : await prisma.strategyPerformance.create({
+        data: {
+          scope: "strategy",
+          userId: ownerUserId,
+          scopeValue: strategyName,
+          ...performanceData
+        }
+      });
   return performance;
 }
 
-export async function getLearningSummary(assetType?: AssetType) {
+export async function getLearningSummary(assetType?: AssetType, userId?: string | null) {
   const performanceWhere = assetType
-    ? { scope: "assetType", scopeValue: assetType }
-    : { scope: "global", scopeValue: "auto-paper-trading" };
+    ? { userId: userId ?? null, scope: "assetType", scopeValue: assetType }
+    : { userId: userId ?? null, scope: "global", scopeValue: "auto-paper-trading" };
   const [performance, insights, predictions] = await Promise.all([
     prisma.strategyPerformance.findFirst({ where: performanceWhere, orderBy: { updatedAt: "desc" } }),
-    prisma.learningInsight.findMany({ where: assetType ? { assetType } : undefined, orderBy: { createdAt: "desc" }, take: 10 }),
-    prisma.aIPrediction.findMany({ where: assetType ? { assetType } : undefined, orderBy: { createdAt: "desc" }, take: 100 })
+    prisma.learningInsight.findMany({ where: { userId: userId ?? null, ...(assetType ? { assetType } : {}) }, orderBy: { createdAt: "desc" }, take: 10 }),
+    prisma.aIPrediction.findMany({ where: { userId: userId ?? null, ...(assetType ? { assetType } : {}) }, orderBy: { createdAt: "desc" }, take: 100 })
   ]);
   const completed = predictions.filter((prediction) => prediction.oneDayReturn !== null);
   const wins = completed.filter((prediction) => (prediction.oneDayReturn ?? 0) > 0);

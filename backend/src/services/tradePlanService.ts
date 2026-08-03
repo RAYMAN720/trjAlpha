@@ -22,6 +22,7 @@ import {
 } from "./paperAccountService.js";
 
 export type TradePlanInput = {
+  userId?: string | null;
   assetType?: AssetType;
   ticker: string;
   currentPrice: number;
@@ -38,17 +39,17 @@ function stopLossStatus(status: string) {
   return normalized.includes("stop-loss") || normalized.includes("stop loss");
 }
 
-async function assertTickerReentryAllowed(assetType: AssetType, ticker: string, now = new Date()) {
+async function assertTickerReentryAllowed(assetType: AssetType, ticker: string, userId?: string | null, now = new Date()) {
   const sessionStart = getTradingSessionStart(assetType, now);
   const sessionTrade = await prisma.paperTrade.findFirst({
-    where: { assetType, ticker, openedAt: { gte: sessionStart } },
+    where: { userId, assetType, ticker, openedAt: { gte: sessionStart } },
     orderBy: { openedAt: "desc" }
   });
   if (sessionTrade) throw new Error(`${ticker} has already been traded in the current session.`);
 
   const cooldownHours = Math.max(1, Number(process.env.STOP_LOSS_REENTRY_COOLDOWN_HOURS ?? 24));
   const recent = await prisma.paperTrade.findMany({
-    where: { assetType, ticker, closedAt: { gte: new Date(now.getTime() - cooldownHours * 60 * 60_000) } },
+    where: { userId, assetType, ticker, closedAt: { gte: new Date(now.getTime() - cooldownHours * 60 * 60_000) } },
     orderBy: { closedAt: "desc" },
     take: 10
   });
@@ -75,7 +76,7 @@ const riskPercentByLevel: Record<string, number> = {
 };
 
 export async function generateTradePlan(input: TradePlanInput) {
-  const user = await getOrCreateUserSettings();
+  const user = await getOrCreateUserSettings(input.userId);
   const assetType = input.assetType ?? "stock";
   const market = marketForAssetType(assetType);
   const stock = await marketDataProvider.getStock(input.ticker, market);
@@ -95,7 +96,7 @@ export async function generateTradePlan(input: TradePlanInput) {
   const [timeframe, advancedRisk, openTrades] = await Promise.all([
     stock ? analyzeMultiTimeframe(input.ticker, assetType) : null,
     getAdvancedRiskStatus(assetType),
-    prisma.paperTrade.count({ where: { assetType, status: "Open" } })
+    prisma.paperTrade.count({ where: { userId: user.id, assetType, status: "Open" } })
   ]);
 
   const riskPercent = riskPercentByLevel[input.riskLevel] ?? 6;
@@ -203,6 +204,7 @@ export async function generateTradePlan(input: TradePlanInput) {
 
   return prisma.tradePlan.create({
     data: {
+      userId: user.id,
       assetType,
       ticker: input.ticker.toUpperCase(),
       entryPrice,
@@ -230,8 +232,8 @@ export async function generateTradePlan(input: TradePlanInput) {
   });
 }
 
-export async function approveDemoTrade(tradePlanId: string) {
-  const plan = await prisma.tradePlan.findUnique({ where: { id: tradePlanId } });
+export async function approveDemoTrade(tradePlanId: string, userId?: string | null) {
+  const plan = await prisma.tradePlan.findFirst({ where: { id: tradePlanId, ...(userId ? { userId } : {}) } });
   if (!plan) throw new Error("Trade plan not found.");
   if (plan.status === "Watchlist Only" || plan.quantity < 1) {
     throw new Error("This plan is not eligible for an active paper trade.");
@@ -258,14 +260,14 @@ export async function approveDemoTrade(tradePlanId: string) {
     throw new Error(`Paper trade blocked because the live price moved ${priceDriftPercent.toFixed(2)}% from the planned entry.`);
   }
   if (plan.signalKey) {
-    const existingSignalTrade = await prisma.paperTrade.findFirst({ where: { assetType: plan.assetType, signalKey: plan.signalKey } });
+    const existingSignalTrade = await prisma.paperTrade.findFirst({ where: { userId: plan.userId, assetType: plan.assetType, signalKey: plan.signalKey } });
     if (existingSignalTrade?.status === "Open") return existingSignalTrade;
     if (existingSignalTrade) throw new Error(`${plan.ticker} has already used this signal.`);
   }
 
-  const existingOpenTicker = await prisma.paperTrade.findFirst({ where: { assetType: plan.assetType, ticker: plan.ticker, status: "Open" } });
+  const existingOpenTicker = await prisma.paperTrade.findFirst({ where: { userId: plan.userId, assetType: plan.assetType, ticker: plan.ticker, status: "Open" } });
   if (existingOpenTicker) return existingOpenTicker;
-  await assertTickerReentryAllowed(assetType, plan.ticker);
+  await assertTickerReentryAllowed(assetType, plan.ticker, plan.userId);
 
   const committeeReview = await evaluateAndRecordTradeCommittee({
     assetType,
@@ -330,16 +332,16 @@ export async function approveDemoTrade(tradePlanId: string) {
   const initialProfitLossPercent = Number(((initialProfitLoss / Math.max(0.01, actualPositionSize)) * 100).toFixed(2));
 
   const trade = await prisma.$transaction(async (tx) => {
-    const account = await reconcilePaperAccount(tx, { createSnapshot: false });
+    const account = await reconcilePaperAccount(tx, { createSnapshot: false, userId: plan.userId });
     if (actualPositionSize > account.availableCash) {
       throw new Error(`Paper account has only ${account.currency} ${account.availableCash.toFixed(2)} available. Simulated position cost is ${account.currency} ${actualPositionSize.toFixed(2)}.`);
     }
 
     if (plan.signalKey) {
-      const existingSignalTrade = await tx.paperTrade.findFirst({ where: { assetType: plan.assetType, signalKey: plan.signalKey } });
+      const existingSignalTrade = await tx.paperTrade.findFirst({ where: { userId: plan.userId, assetType: plan.assetType, signalKey: plan.signalKey } });
       if (existingSignalTrade) return existingSignalTrade;
     }
-    const existingOpenTrade = await tx.paperTrade.findFirst({ where: { assetType: plan.assetType, ticker: plan.ticker, status: "Open" } });
+    const existingOpenTrade = await tx.paperTrade.findFirst({ where: { userId: plan.userId, assetType: plan.assetType, ticker: plan.ticker, status: "Open" } });
     if (existingOpenTrade) return existingOpenTrade;
 
     await tx.tradePlan.update({
@@ -358,6 +360,7 @@ export async function approveDemoTrade(tradePlanId: string) {
 
     const created = await tx.paperTrade.create({
       data: {
+        userId: plan.userId,
         assetType: plan.assetType,
         ticker: plan.ticker,
         entryPrice: actualEntryPrice,
@@ -380,6 +383,7 @@ export async function approveDemoTrade(tradePlanId: string) {
     await tx.executionSimulation.create({
       data: {
         paperTradeId: created.id,
+        userId: plan.userId,
         assetType,
         ticker: plan.ticker,
         side: execution.side,
@@ -493,8 +497,8 @@ export async function closePaperTrade(
  * User-facing close action. The client cannot choose the execution price; the
  * backend fetches a fresh quote from an approved provider and enforces market hours.
  */
-export async function closePaperTradeAtMarket(id: string, status = "manual_close") {
-  const trade = await prisma.paperTrade.findUnique({ where: { id } });
+export async function closePaperTradeAtMarket(id: string, status = "manual_close", userId?: string | null) {
+  const trade = await prisma.paperTrade.findFirst({ where: { id, ...(userId ? { userId } : {}) } });
   if (!trade) throw new Error("Paper trade not found.");
   if (trade.status !== "Open") return trade;
 
@@ -529,8 +533,8 @@ export async function updatePaperTradePrice(id: string, currentPrice: number) {
 }
 
 /** User-facing refresh action; ignores any client-supplied price. */
-export async function refreshPaperTradeFromMarket(id: string) {
-  const trade = await prisma.paperTrade.findUnique({ where: { id } });
+export async function refreshPaperTradeFromMarket(id: string, userId?: string | null) {
+  const trade = await prisma.paperTrade.findFirst({ where: { id, ...(userId ? { userId } : {}) } });
   if (!trade) throw new Error("Paper trade not found.");
   if (trade.status !== "Open") return trade;
 

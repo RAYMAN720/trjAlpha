@@ -20,12 +20,15 @@ import {
   Siren,
   Target,
   Trophy,
+  LogOut,
+  UserRound,
   WalletCards,
   X
 } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMarketMode, type MarketMode } from "../lib/marketMode";
+import { api, clearAuthToken } from "../lib/api";
 
 const navGroups = [
   {
@@ -72,6 +75,7 @@ const navGroups = [
       { to: "/reports/weekly", label: "Weekly Report", icon: ClipboardList },
       { to: "/broker", label: "Broker Center", icon: Building2 },
       { to: "/journal", label: "Journal", icon: BookOpenText },
+      { to: "/profile", label: "Profile", icon: UserRound },
       { to: "/settings", label: "Settings", icon: Settings }
     ]
   }
@@ -135,6 +139,7 @@ export function Header({ openMenu }: { openMenu: () => void }) {
   const { marketMode, setMarketMode } = useMarketMode();
   const navigate = useNavigate();
   const location = useLocation();
+  const [displayName, setDisplayName] = useState("Trader");
   const modes: Array<{ value: MarketMode; label: string }> = [
     { value: "stocks", label: "Stocks" },
     { value: "crypto", label: "Crypto" }
@@ -155,6 +160,15 @@ export function Header({ openMenu }: { openMenu: () => void }) {
   function switchMode(nextMode: MarketMode) {
     setMarketMode(nextMode);
     navigate(equivalentPath(nextMode));
+  }
+
+  useEffect(() => {
+    api.session().then((session) => setDisplayName(session.displayName || "Trader")).catch(() => setDisplayName("Trader"));
+  }, []);
+
+  function logout() {
+    clearAuthToken();
+    window.location.assign("/");
   }
 
   return (
@@ -186,6 +200,21 @@ export function Header({ openMenu }: { openMenu: () => void }) {
             <Shield className="h-4 w-4" />
             Paper Trading Only
           </div>
+          <NavLink
+            className="hidden h-10 items-center gap-2 rounded-lg border border-line bg-white/[0.04] px-3 text-sm font-semibold text-stone-200 hover:border-mint/40 hover:text-mint sm:inline-flex"
+            to="/profile"
+          >
+            <UserRound className="h-4 w-4" />
+            {displayName}
+          </NavLink>
+          <button
+            className="hidden h-10 items-center justify-center rounded-lg border border-line bg-white/[0.04] px-3 text-stone-400 hover:border-danger/40 hover:text-red-100 sm:inline-flex"
+            onClick={logout}
+            title="Log out"
+            type="button"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </header>
@@ -202,7 +231,7 @@ export function AppLayout() {
     { to: `${base}/paper-trading/live`, label: "Live", icon: RadioTower },
     { to: `${base}/portfolio`, label: "Portfolio", icon: PieChart },
     { to: `${base}/news`, label: "News", icon: Newspaper },
-    { to: "/settings", label: "Settings", icon: Settings }
+    { to: "/profile", label: "Profile", icon: UserRound }
   ];
 
   return (
